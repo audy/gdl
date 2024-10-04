@@ -1,9 +1,13 @@
 use csv::ReaderBuilder;
+use futures::{future, StreamExt};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use reqwest::Client;
 use std::error::Error;
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write};
 use taxonomy::ncbi::load;
 use taxonomy::Taxonomy;
+use tokio::task;
 
 const ASSEMBLY_SUMMARY_PATH: &str = "assembly_summary_refseq.txt";
 const TAXDUMP_DIR: &str = "taxdump";
@@ -16,9 +20,45 @@ struct NCBIAssembly {
     ftp_path: String,
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
+type BoxedError = Box<dyn Error + Send + Sync + 'static>;
+
+async fn download_assembly(
+    client: &Client,
+    assembly: &NCBIAssembly,
+    pb: ProgressBar,
+) -> Result<(), BoxedError> {
+    pb.set_message(format!("Starting {}", assembly.ftp_path));
+
+    let last_part = assembly
+        .ftp_path
+        .split('/')
+        .last()
+        .expect("Failed to get the filename");
+    let url = format!("{}/{}_genomic.fna.gz", assembly.ftp_path, last_part);
+
+    let response = client.get(url).send().await?;
+    let total_size = response.content_length().unwrap_or(0);
+
+    pb.set_length(total_size);
+
+    let mut file = File::create(format!("{}.fna.gz", last_part))?;
+    let mut stream = response.bytes_stream();
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        pb.inc(chunk.len() as u64);
+        file.write_all(&chunk)?;
+    }
+
+    pb.finish_with_message(format!("Complete {}", assembly.ftp_path));
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let assembly_summary_file = File::open(ASSEMBLY_SUMMARY_PATH)?;
 
+    // this seems to use the least amount of memory out of all the formats
     let tax = load(TAXDUMP_DIR)?;
 
     let descendant_tax_ids = tax.descendants(TARGET_TAX_ID)?;
@@ -40,14 +80,44 @@ fn main() -> Result<(), Box<dyn Error>> {
         .has_headers(true)
         .from_reader(buf_reader);
 
+    let mut assemblies: Vec<NCBIAssembly> = Vec::new();
+
     for result in reader.deserialize() {
         let assembly: NCBIAssembly = result?;
         if descendant_tax_ids.contains(&assembly.taxid.as_str()) {
             let name = tax.name(assembly.taxid.as_str())?;
-            println!("taxid: {} -> {}", assembly.taxid, name);
-            println!("  ftp_path: {}", assembly.ftp_path);
+            assemblies.push(assembly);
         }
     }
+
+    println!("Downloading {} assemblies", assemblies.len());
+
+    let multi_process = MultiProgress::new();
+    let progress_bars: Vec<_> = assemblies
+        .into_iter()
+        .map(|assembly| {
+            let pb = multi_process.add(ProgressBar::new(0));
+            pb.set_style(
+                ProgressStyle::with_template(
+                    "{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes}"
+                ).unwrap()
+                 .progress_chars("#>-"));
+            (assembly, pb)
+        })
+        .collect();
+
+    // Download assemblies in parallel
+    let client = Client::new();
+
+    let tasks: Vec<_> = progress_bars
+        .into_iter()
+        .map(|(assembly, pb)| {
+            let client = client.clone();
+            task::spawn(async move { download_assembly(&client, &assembly, pb).await })
+        })
+        .collect();
+
+    future::join_all(tasks).await;
 
     Ok(())
 }
