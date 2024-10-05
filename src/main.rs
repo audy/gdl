@@ -1,4 +1,4 @@
-use clap::Parser;
+use clap::{ArgGroup, Parser};
 use csv::ReaderBuilder;
 use futures::{future, StreamExt};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
@@ -8,18 +8,30 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::sync::Arc;
 use taxonomy::ncbi::load;
-use taxonomy::Taxonomy;
+use taxonomy::{GeneralTaxonomy, Taxonomy};
 use tokio::sync::Semaphore;
 use tokio::task;
 
 #[derive(Parser, Debug)]
+#[command(group(
+        ArgGroup::new("tax_id_or_name")
+        .required(true)
+        .args(&["tax_id", "tax_name"])
+))]
 struct Args {
-    #[clap(short, long, default_value = "1273132")]
-    tax_id: String,
+    /// tax_id to download assemblies for (includes descendants)
+    #[clap(short, long)]
+    tax_id: Option<String>, // should this be an int (for validation)
 
+    /// tax_name to download assemblies for (includes descendants)
+    #[clap(short, long)]
+    tax_name: Option<String>,
+
+    /// path to assembly_summary.txt
     #[clap(short, long, default_value = "assembly_summary_refseq.txt")]
     assembly_summary_path: String,
 
+    /// path to extracted taxdump.tar.gz
     #[clap(short, long, default_value = "taxdump")]
     taxdump_path: String,
 }
@@ -65,17 +77,39 @@ async fn download_assembly(
     Ok(())
 }
 
+fn get_tax_id<'a>(
+    tax_id: Option<&'a str>,
+    tax_name: Option<&'a str>,
+    tax: &'a GeneralTaxonomy,
+) -> Result<&'a str, &'a str> {
+    // TODO: make sure tax ID exists
+    match (tax_id, tax_name) {
+        (Some(tax_id), None) => Ok(tax_id),
+        (None, Some(tax_name)) => {
+            let matches = tax.find_all_by_name(tax_name);
+            match matches.len() {
+                0 => Err("No matches found"),
+                1 => Ok(matches.first().expect("No tax ID?")),
+                _ => Err("Ambiguous Name!"),
+            }
+        }
+        _ => Err("Either --tax-id or --tax-name must be provided, but not both"),
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
-    let assembly_summary_file = File::open(args.assembly_summary_path.clone())?;
-
     // this seems to use the least amount of memory out of all the formats
     println!("Loading taxonomy from {}...", args.taxdump_path);
-    let tax = load(args.taxdump_path)?;
+    let tax = load(&args.taxdump_path)?;
 
-    let tax_id: &str = &args.tax_id;
+    // TODO: actually look up the tax ID if given a name
+    let tax_id: &str = get_tax_id(args.tax_id.as_deref(), args.tax_name.as_deref(), &tax)
+        .expect("Unable to find a tax ID");
+
+    let assembly_summary_file = File::open(args.assembly_summary_path.clone())?;
 
     let descendant_tax_ids = tax.descendants(tax_id)?;
 
@@ -83,7 +117,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Found {} descendants of {} ({})...",
         descendant_tax_ids.len(),
         tax.name(tax_id)?,
-        args.tax_id
+        tax_id
     );
 
     println!(
@@ -110,7 +144,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for result in reader.deserialize() {
         let assembly: NCBIAssembly = result?;
         if descendant_tax_ids.contains(&assembly.taxid.as_str()) {
-            let name = tax.name(assembly.taxid.as_str())?;
             assemblies.push(assembly);
         }
     }
