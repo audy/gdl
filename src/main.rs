@@ -3,6 +3,7 @@ use csv::ReaderBuilder;
 use futures::{future, StreamExt};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use reqwest::Client;
+use std::collections::HashSet;
 use std::error::Error;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
@@ -112,7 +113,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let assembly_summary_file = File::open(args.assembly_summary_path.clone())?;
 
-    let descendant_tax_ids = tax.descendants(tax_id)?;
+    let descendant_tax_ids: HashSet<&str> = tax.descendants(tax_id)?.into_iter().collect();
 
     println!(
         "Found {} descendants of {} ({})...",
