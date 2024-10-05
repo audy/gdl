@@ -1,3 +1,4 @@
+use clap::Parser;
 use csv::ReaderBuilder;
 use futures::{future, StreamExt};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
@@ -11,10 +12,17 @@ use taxonomy::Taxonomy;
 use tokio::sync::Semaphore;
 use tokio::task;
 
-const ASSEMBLY_SUMMARY_PATH: &str = "assembly_summary_refseq.txt";
-const TAXDUMP_DIR: &str = "taxdump";
+#[derive(Parser, Debug)]
+struct Args {
+    #[clap(short, long, default_value = "1273132")]
+    tax_id: String,
 
-const TARGET_TAX_ID: &str = "821"; // Phocaeicola dorei
+    #[clap(short, long, default_value = "assembly_summary_refseq.txt")]
+    assembly_summary_path: String,
+
+    #[clap(short, long, default_value = "taxdump")]
+    taxdump_path: String,
+}
 
 #[derive(Debug, serde::Deserialize)]
 struct NCBIAssembly {
@@ -59,26 +67,36 @@ async fn download_assembly(
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let assembly_summary_file = File::open(ASSEMBLY_SUMMARY_PATH)?;
+    let args = Args::parse();
+
+    let assembly_summary_file = File::open(args.assembly_summary_path.clone())?;
 
     // this seems to use the least amount of memory out of all the formats
-    println!("Loading taxonomy from {}...", TAXDUMP_DIR);
-    let tax = load(TAXDUMP_DIR)?;
+    println!("Loading taxonomy from {}...", args.taxdump_path);
+    let tax = load(args.taxdump_path)?;
 
-    let descendant_tax_ids = tax.descendants(TARGET_TAX_ID)?;
+    let tax_id: &str = &args.tax_id;
+
+    let descendant_tax_ids = tax.descendants(tax_id)?;
 
     println!(
         "Found {} descendants of {} ({})...",
         descendant_tax_ids.len(),
-        tax.name(TARGET_TAX_ID)?,
-        TARGET_TAX_ID
+        tax.name(tax_id)?,
+        args.tax_id
     );
 
-    println!("Reading assembly summaries from {}", ASSEMBLY_SUMMARY_PATH,);
+    println!(
+        "Reading assembly summaries from {}",
+        args.assembly_summary_path
+    );
+
+    // TODO: progress bar for ^^^
 
     // skip first line because it doesn't contain an actual header
     let mut buf_reader = BufReader::new(assembly_summary_file);
     let mut first_line = String::new();
+    // do we really have to read it _into_ something?
     buf_reader.read_line(&mut first_line)?;
 
     let mut reader = ReaderBuilder::new()
@@ -88,7 +106,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut assemblies: Vec<NCBIAssembly> = Vec::new();
 
-    // todo: start downloading Assemblies immediately
+    // todo: start downloading Assemblies immediately (except we do't know the total?)
     for result in reader.deserialize() {
         let assembly: NCBIAssembly = result?;
         if descendant_tax_ids.contains(&assembly.taxid.as_str()) {
