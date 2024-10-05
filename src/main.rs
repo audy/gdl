@@ -35,6 +35,10 @@ struct Args {
     /// path to extracted taxdump.tar.gz
     #[clap(short, long, default_value = "taxdump")]
     taxdump_path: String,
+
+    /// number of simultaneous downloads
+    #[clap(short, long, default_value_t = 4, value_parser = clap::value_parser!(u32))]
+    parallel: u32,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -171,7 +175,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Download assemblies in parallel
     let client = Client::new();
 
-    let semaphore = Arc::new(Semaphore::new(12));
+    let semaphore = Arc::new(Semaphore::new(args.parallel as usize));
 
     let tasks: Vec<_> = progress_bars
         .into_iter()
