@@ -105,9 +105,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Loading taxonomy from {}...", args.taxdump_path);
     let tax = load(&args.taxdump_path)?;
 
-    // TODO: actually look up the tax ID if given a name
     let tax_id: &str = get_tax_id(args.tax_id.as_deref(), args.tax_name.as_deref(), &tax)
         .expect("Unable to find a tax ID");
+
+    println!("Found tax ID {}", tax_id);
 
     let assembly_summary_file = File::open(args.assembly_summary_path.clone())?;
 
