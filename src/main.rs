@@ -20,14 +20,6 @@ use tokio::task;
         .args(&["tax_id", "tax_name"])
 ))]
 struct Args {
-    /// tax_id to download assemblies for (includes descendants)
-    #[clap(short, long)]
-    tax_id: Option<String>, // should this be an int (for validation)
-
-    /// tax_name to download assemblies for (includes descendants)
-    #[clap(short, long)]
-    tax_name: Option<String>,
-
     /// path to assembly_summary.txt
     #[clap(short, long, default_value = "assembly_summary_refseq.txt")]
     assembly_summary_path: String,
@@ -39,6 +31,21 @@ struct Args {
     /// number of simultaneous downloads
     #[clap(short, long, default_value_t = 4, value_parser = clap::value_parser!(u32))]
     parallel: u32,
+
+    /*
+    FILTERING PARAMETERS
+    */
+    /// tax_id to download assemblies for (includes descendants)
+    #[clap(short, long)]
+    tax_id: Option<String>, // should this be an int (for validation)
+    /// tax_name to download assemblies for (includes descendants)
+    #[clap(short, long)]
+    tax_name: Option<String>,
+
+    /// include assemblies that match this assembly level. can be used multiple times
+    /// by default, all assembly_levels are included
+    #[clap(short, long)]
+    assembly_level: Option<Vec<String>>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -46,6 +53,7 @@ struct NCBIAssembly {
     taxid: String,
     ftp_path: String,
     asm_name: String,
+    assembly_level: String,
 }
 
 type BoxedError = Box<dyn Error + Send + Sync + 'static>;
@@ -149,7 +157,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // todo: start downloading Assemblies immediately (except we do't know the total?)
     for result in reader.deserialize() {
         let assembly: NCBIAssembly = result?;
-        if descendant_tax_ids.contains(&assembly.taxid.as_str()) {
+        if descendant_tax_ids.contains(&assembly.taxid.as_str())
+            && (args.assembly_level.is_none()
+                || (args
+                    .assembly_level
+                    .as_ref()
+                    .expect("What")
+                    .contains(&assembly.assembly_level)))
+        {
             assemblies.push(assembly);
         }
     }
