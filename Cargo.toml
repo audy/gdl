@@ -1,7 +1,8 @@
 [package]
-name = "fetch-genomes"
+name = "gdl"
 version = "0.1.0"
 edition = "2021"
+authors = [ "Austin Davis-Richardson <hello@agdr.org>" ]
 
 [dependencies]
 clap = { version = "4.5.19", features = ["derive"] }

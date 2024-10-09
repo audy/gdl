@@ -65,6 +65,7 @@ async fn download_assembly(
 ) -> Result<(), BoxedError> {
     pb.set_message(format!("Starting {}", assembly.asm_name));
 
+    // TODO: use a proper url parser
     let last_part = assembly
         .ftp_path
         .split('/')
@@ -103,6 +104,7 @@ fn get_tax_id<'a>(
             match matches.len() {
                 0 => Err("No matches found"),
                 1 => Ok(matches.first().expect("No tax ID?")),
+                // TODO: show matched lineages and their tax IDs to help the user disambiguate
                 _ => Err("Ambiguous Name!"),
             }
         }
@@ -179,7 +181,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(|assembly| {
             let pb = multi_process.add(ProgressBar::new(0));
             pb.set_style(
-                ProgressStyle::with_template("{spinner:.green} [{elapsed_precise}] [{bar:.cyan/blue}] {bytes}/{total_bytes} - {msg}")
+                // todo add the assembly # and total assemblies here
+                ProgressStyle::with_template("{spinner:.green} [{len}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} - {msg}")
                     .unwrap()
                     .progress_chars("#>-"),
             );
