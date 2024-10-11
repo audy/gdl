@@ -7,8 +7,6 @@ aims to be fast, easy to use, and fast.
 
 # TODOs
 
-0. Automatically fetch assembly summaries and NCBI tax dumps if necessary.
-   Cache them somewhere `~/.gdl-cache` or `$(pwd)/.gdl` or maybe just `/tmp`?
 1. `--format` - fasta, genbank, gff, ...
 2. `--out-dir`
 3. `--cache-dir` - where to store the NCBI tax dump and `assembly_summary.txt`
@@ -16,6 +14,7 @@ aims to be fast, easy to use, and fast.
 5. `--no-clobber` - skip existing files
 6. `--verify` - download and check MD5SUM files
 7. `--dry-run` - do not actually download anything
+8. A single, global progress bar with an ETA
 
 ## Features
 
@@ -38,7 +37,6 @@ gdl --tax-id 562 --format fasta
 
 # download all E. coli genomes in GFF format
 gdl --tax-id 562 --format gff
-
 ```
 
 ### Advanced Filtering
