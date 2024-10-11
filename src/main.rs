@@ -24,7 +24,7 @@ use tokio::task;
 ))]
 struct Args {
     /// path to assembly_summary.txt
-    #[clap(short, long, default_value = "assembly_summary_refseq.txt")]
+    #[clap(short, long, default_value = "assembly_summary_genbank.txt")]
     assembly_summary_path: String,
 
     /// path to extracted taxdump.tar.gz
@@ -115,10 +115,10 @@ fn get_tax_id<'a>(
     }
 }
 
-async fn download_and_extract_taxdump() -> Result<(), BoxedError> {
+async fn download_and_extract_taxdump(path: &str) -> Result<(), BoxedError> {
     let client = Client::new();
 
-    let output_dir = "taxdump";
+    let output_dir = path;
 
     const TAXDUMP_URL: &str = "https://ftp.ncbi.nih.gov/pub/taxonomy/taxdump.tar.gz";
 
@@ -146,6 +146,24 @@ async fn download_and_extract_taxdump() -> Result<(), BoxedError> {
     Ok(())
 }
 
+async fn download_assembly_summary(path: &str) -> Result<(), BoxedError> {
+    let client = Client::new();
+
+    const ASSEMBLY_SUMMARY_URL: &str =
+        "https://ftp.ncbi.nlm.nih.gov/genomes/ASSEMBLY_REPORTS/assembly_summary_genbank.txt";
+
+    let response = client.get(ASSEMBLY_SUMMARY_URL).send().await?;
+
+    let mut file = File::create(path)?;
+    let mut stream = response.bytes_stream();
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        file.write_all(&chunk)?
+    }
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
@@ -156,7 +174,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let path = Path::new(&args.taxdump_path);
     if !path.exists() {
         println!("Downloading taxdump");
-        let _ = download_and_extract_taxdump().await;
+        let _ = download_and_extract_taxdump(&args.taxdump_path).await;
     } else {
         println!("Using cached taxdump: {}", args.taxdump_path);
     }
@@ -167,6 +185,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("Unable to find a tax ID");
 
     println!("Found tax ID {}", tax_id);
+
+    let path = Path::new(&args.assembly_summary_path);
+    if !path.exists() {
+        println!("Downloading assembly summary");
+        let _ = download_assembly_summary(&args.assembly_summary_path).await;
+    } else {
+        println!(
+            "Using cached assembly summary: {}",
+            args.assembly_summary_path
+        );
+    }
 
     let assembly_summary_file = File::open(args.assembly_summary_path.clone())?;
 
