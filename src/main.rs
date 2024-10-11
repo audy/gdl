@@ -1,5 +1,6 @@
 use clap::{ArgGroup, Parser};
 use csv::ReaderBuilder;
+use flate2::read::GzDecoder;
 use futures::{future, StreamExt};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use reqwest::Client;
@@ -7,7 +8,9 @@ use std::collections::HashSet;
 use std::error::Error;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
+use std::path::Path;
 use std::sync::Arc;
+use tar::Archive;
 use taxonomy::ncbi::load;
 use taxonomy::{GeneralTaxonomy, Taxonomy};
 use tokio::sync::Semaphore;
@@ -112,12 +115,52 @@ fn get_tax_id<'a>(
     }
 }
 
+async fn download_and_extract_taxdump() -> Result<(), BoxedError> {
+    let client = Client::new();
+
+    let output_dir = "taxdump";
+
+    const TAXDUMP_URL: &str = "https://ftp.ncbi.nih.gov/pub/taxonomy/taxdump.tar.gz";
+
+    let response = client.get(TAXDUMP_URL).send().await?;
+
+    let mut file = File::create("taxdump.tar.gz")?;
+    let mut stream = response.bytes_stream();
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        file.write_all(&chunk)?
+    }
+
+    let tar_gz = File::open("taxdump.tar.gz")?;
+    let decompressed = GzDecoder::new(tar_gz);
+
+    let mut archive = Archive::new(decompressed);
+
+    std::fs::create_dir_all(output_dir)?;
+
+    archive.unpack(output_dir)?;
+
+    println!("Extracted taxdump.tar.gz into {}", output_dir);
+
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
     // this seems to use the least amount of memory out of all the formats
     println!("Loading taxonomy from {}...", args.taxdump_path);
+
+    let path = Path::new(&args.taxdump_path);
+    if !path.exists() {
+        println!("Downloading taxdump");
+        let _ = download_and_extract_taxdump().await;
+    } else {
+        println!("Using cached taxdump: {}", args.taxdump_path);
+    }
+
     let tax = load(&args.taxdump_path)?;
 
     let tax_id: &str = get_tax_id(args.tax_id.as_deref(), args.tax_name.as_deref(), &tax)
