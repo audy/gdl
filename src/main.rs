@@ -6,7 +6,7 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use reqwest::Client;
 use std::collections::HashSet;
 use std::error::Error;
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::sync::Arc;
@@ -142,6 +142,8 @@ async fn download_and_extract_taxdump(path: &str) -> Result<(), BoxedError> {
     archive.unpack(output_dir)?;
 
     println!("Extracted taxdump.tar.gz into {}", output_dir);
+
+    fs::remove_file("taxdump.tar.gz")?;
 
     Ok(())
 }
