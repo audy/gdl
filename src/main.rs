@@ -23,9 +23,9 @@ const ASSEMBLY_SUMMARY_URL: &str =
     "https://ftp.ncbi.nlm.nih.gov/genomes/ASSEMBLY_REPORTS/assembly_summary_genbank.txt";
 
 const PB_DOWNLOAD_TEMPLATE: &str =
-    "{spinner:.white} {msg} [{elapsed_precise}] [{bar:.white/green}] {pos}/{len}";
-
-const PB_SPINNER_TEMPLATE: &str = "{spinner:.white} {msg}";
+    "{msg} [{elapsed_precise}] [{bar:.white/green}] {bytes}/{total_bytes}";
+const PB_PROGRESS_TEMPLATE: &str = "{msg} [{elapsed_precise}] [{bar:.white/green}] {pos}/{len}";
+const PB_SPINNER_TEMPLATE: &str = "{spinner:.green} {msg}";
 
 #[derive(Parser, Debug)]
 #[command(group(
@@ -267,7 +267,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )));
 
     pb.lock().await.set_style(
-        ProgressStyle::with_template(PB_DOWNLOAD_TEMPLATE)
+        ProgressStyle::with_template(PB_PROGRESS_TEMPLATE)
             .unwrap()
             .progress_chars("#>-"),
     );
