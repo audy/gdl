@@ -2,7 +2,7 @@ use clap::{ArgGroup, Parser};
 use csv::ReaderBuilder;
 use flate2::read::GzDecoder;
 use futures::{future, StreamExt};
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::Client;
 use std::collections::HashSet;
 use std::error::Error;
@@ -10,11 +10,22 @@ use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
 use tar::Archive;
 use taxonomy::ncbi::load;
 use taxonomy::{GeneralTaxonomy, Taxonomy};
-use tokio::sync::Semaphore;
+use tokio::sync::{Mutex, Semaphore};
 use tokio::task;
+
+const TAXDUMP_URL: &str = "https://ftp.ncbi.nih.gov/pub/taxonomy/taxdump.tar.gz";
+const ASSEMBLY_SUMMARY_URL: &str =
+    "https://ftp.ncbi.nlm.nih.gov/genomes/ASSEMBLY_REPORTS/assembly_summary_genbank.txt";
+
+const PB_DOWNLOAD_TEMPLATE: &str =
+    "{spinner:.white} {msg} [{elapsed_precise}] [{bar:.white/green}] {pos}/{len}";
+
+const PB_SPINNER_TEMPLATE: &str = "{spinner:.white} {msg}";
 
 #[derive(Parser, Debug)]
 #[command(group(
@@ -51,23 +62,17 @@ struct Args {
     assembly_level: Option<Vec<String>>,
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Deserialize)]
 struct NCBIAssembly {
     taxid: String,
     ftp_path: String,
-    asm_name: String,
+    // asm_name: String,
     assembly_level: String,
 }
 
 type BoxedError = Box<dyn Error + Send + Sync + 'static>;
 
-async fn download_assembly(
-    client: &Client,
-    assembly: &NCBIAssembly,
-    pb: ProgressBar,
-) -> Result<(), BoxedError> {
-    pb.set_message(format!("Starting {}", assembly.asm_name));
-
+async fn download_assembly(client: &Client, assembly: &NCBIAssembly) -> Result<(), BoxedError> {
     // TODO: use a proper url parser
     let last_part = assembly
         .ftp_path
@@ -77,20 +82,15 @@ async fn download_assembly(
     let url = format!("{}/{}_genomic.fna.gz", assembly.ftp_path, last_part);
 
     let response = client.get(url).send().await?;
-    let total_size = response.content_length().unwrap_or(0);
-
-    pb.set_length(total_size);
 
     let mut file = File::create(format!("{}.fna.gz", last_part))?;
     let mut stream = response.bytes_stream();
 
     while let Some(chunk) = stream.next().await {
         let chunk = chunk?;
-        pb.inc(chunk.len() as u64);
         file.write_all(&chunk)?;
     }
 
-    pb.finish_and_clear();
     Ok(())
 }
 
@@ -116,53 +116,67 @@ fn get_tax_id<'a>(
 }
 
 async fn download_and_extract_taxdump(path: &str) -> Result<(), BoxedError> {
+    if Path::new(path).exists() {
+        return Ok(());
+    }
+
     let client = Client::new();
-
-    let output_dir = path;
-
-    const TAXDUMP_URL: &str = "https://ftp.ncbi.nih.gov/pub/taxonomy/taxdump.tar.gz";
-
     let response = client.get(TAXDUMP_URL).send().await?;
 
+    let pb = ProgressBar::new(response.content_length().unwrap_or(0));
+    pb.set_style(
+        ProgressStyle::with_template(PB_DOWNLOAD_TEMPLATE)
+            .unwrap()
+            .progress_chars("#>-"),
+    );
+
+    pb.set_message("Fetching taxonomy");
     let mut file = File::create("taxdump.tar.gz")?;
     let mut stream = response.bytes_stream();
-
     while let Some(chunk) = stream.next().await {
         let chunk = chunk?;
+        pb.inc(chunk.len() as u64);
         file.write_all(&chunk)?
     }
 
+    pb.set_message("Extracting taxonomy");
     let tar_gz = File::open("taxdump.tar.gz")?;
     let decompressed = GzDecoder::new(tar_gz);
-
     let mut archive = Archive::new(decompressed);
-
-    std::fs::create_dir_all(output_dir)?;
-
-    archive.unpack(output_dir)?;
-
-    println!("Extracted taxdump.tar.gz into {}", output_dir);
-
+    std::fs::create_dir_all(path)?;
+    archive.unpack(path)?;
     fs::remove_file("taxdump.tar.gz")?;
+
+    pb.finish_and_clear();
 
     Ok(())
 }
 
 async fn download_assembly_summary(path: &str) -> Result<(), BoxedError> {
+    if Path::new(path).exists() {
+        return Ok(());
+    }
     let client = Client::new();
-
-    const ASSEMBLY_SUMMARY_URL: &str =
-        "https://ftp.ncbi.nlm.nih.gov/genomes/ASSEMBLY_REPORTS/assembly_summary_genbank.txt";
-
     let response = client.get(ASSEMBLY_SUMMARY_URL).send().await?;
+
+    let pb = ProgressBar::new(response.content_length().unwrap_or(0));
+    pb.set_style(
+        ProgressStyle::with_template(PB_DOWNLOAD_TEMPLATE)
+            .unwrap()
+            .progress_chars("#>-"),
+    );
+
+    pb.set_message("Fetching assembly summary");
 
     let mut file = File::create(path)?;
     let mut stream = response.bytes_stream();
-
     while let Some(chunk) = stream.next().await {
         let chunk = chunk?;
+        pb.inc(chunk.len() as u64);
         file.write_all(&chunk)?
     }
+
+    pb.finish_and_clear();
     Ok(())
 }
 
@@ -170,50 +184,42 @@ async fn download_assembly_summary(path: &str) -> Result<(), BoxedError> {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
-    // this seems to use the least amount of memory out of all the formats
-    println!("Loading taxonomy from {}...", args.taxdump_path);
+    // download taxonomy and assembly summary
+    let _ = download_and_extract_taxdump(&args.taxdump_path).await;
+    let _ = download_assembly_summary(&args.assembly_summary_path).await;
 
-    let path = Path::new(&args.taxdump_path);
-    if !path.exists() {
-        println!("Downloading taxdump");
-        let _ = download_and_extract_taxdump(&args.taxdump_path).await;
-    } else {
-        println!("Using cached taxdump: {}", args.taxdump_path);
-    }
+    let pb = ProgressBar::new(0);
+
+    pb.set_style(ProgressStyle::with_template(PB_SPINNER_TEMPLATE).unwrap());
+    pb.set_message("Loading taxonomy");
+
+    // Spawn a separate thread to tick the spinner
+    let pb_clone = pb.clone();
+    thread::spawn(move || {
+        // Continuously tick the spinner until the taxonomy is loaded
+        while !pb_clone.is_finished() {
+            pb_clone.tick();
+            thread::sleep(Duration::from_millis(100)); // Adjust tick rate as needed
+        }
+    });
 
     let tax = load(&args.taxdump_path)?;
+    pb.set_message(format!("Loaded {} taxa", Taxonomy::<&str>::len(&tax)));
 
     let tax_id: &str = get_tax_id(args.tax_id.as_deref(), args.tax_name.as_deref(), &tax)
         .expect("Unable to find a tax ID");
 
-    println!("Found tax ID {}", tax_id);
-
-    let path = Path::new(&args.assembly_summary_path);
-    if !path.exists() {
-        println!("Downloading assembly summary");
-        let _ = download_assembly_summary(&args.assembly_summary_path).await;
-    } else {
-        println!(
-            "Using cached assembly summary: {}",
-            args.assembly_summary_path
-        );
-    }
-
-    let assembly_summary_file = File::open(args.assembly_summary_path.clone())?;
-
     let descendant_tax_ids: HashSet<&str> = tax.descendants(tax_id)?.into_iter().collect();
 
-    println!(
-        "Found {} descendants of {} ({})...",
+    pb.finish_with_message(format!(
+        "Found {} descendants of {} ({})",
         descendant_tax_ids.len(),
         tax.name(tax_id)?,
         tax_id
-    );
+    ));
 
-    println!(
-        "Reading assembly summaries from {}",
-        args.assembly_summary_path
-    );
+    // filter assembly summaries
+    let assembly_summary_file = File::open(args.assembly_summary_path.clone())?;
 
     // TODO: progress bar for ^^^
 
@@ -223,6 +229,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // do we really have to read it _into_ something?
     buf_reader.read_line(&mut first_line)?;
 
+    let pb = ProgressBar::new(buf_reader.get_ref().metadata()?.len());
+
     let mut reader = ReaderBuilder::new()
         .delimiter(b'\t')
         .has_headers(true)
@@ -230,58 +238,63 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut assemblies: Vec<NCBIAssembly> = Vec::new();
 
-    // todo: start downloading Assemblies immediately (except we do't know the total?)
+    pb.set_style(ProgressStyle::with_template(PB_SPINNER_TEMPLATE).unwrap());
+
     for result in reader.deserialize() {
         let assembly: NCBIAssembly = result?;
+
         if descendant_tax_ids.contains(&assembly.taxid.as_str())
             && (args.assembly_level.is_none()
                 || (args
                     .assembly_level
                     .as_ref()
-                    .expect("What")
+                    .expect("Unable to parse assembly level")
                     .contains(&assembly.assembly_level)))
         {
             assemblies.push(assembly);
+            pb.set_message(format!("found {} assemblies", assemblies.len()));
         }
     }
 
-    println!("Downloading {} assemblies", assemblies.len());
-
-    // TODO: one master progress bar with ETA?
-
-    let multi_process = MultiProgress::new();
-    let progress_bars: Vec<_> = assemblies
-        .into_iter()
-        .map(|assembly| {
-            let pb = multi_process.add(ProgressBar::new(0));
-            pb.set_style(
-                // todo add the assembly # and total assemblies here
-                ProgressStyle::with_template("{spinner:.green} [{len}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} - {msg}")
-                    .unwrap()
-                    .progress_chars("#>-"),
-            );
-            (assembly, pb)
-        })
-        .collect();
+    pb.finish_with_message(format!("Found {} assemblies", assemblies.len()));
 
     // Download assemblies in parallel
     let client = Client::new();
-
     let semaphore = Arc::new(Semaphore::new(args.parallel as usize));
 
-    let tasks: Vec<_> = progress_bars
+    let pb = Arc::new(Mutex::new(ProgressBar::new(
+        assemblies.len().try_into().unwrap(),
+    )));
+
+    pb.lock().await.set_style(
+        ProgressStyle::with_template(PB_DOWNLOAD_TEMPLATE)
+            .unwrap()
+            .progress_chars("#>-"),
+    );
+
+    pb.lock().await.set_message("Downloading assemblies");
+
+    let tasks: Vec<_> = assemblies
+        .clone()
         .into_iter()
-        .map(|(assembly, pb)| {
+        .map(|assembly| {
             let client = client.clone();
             let semaphore = semaphore.clone();
+            let pb = Arc::clone(&pb);
             task::spawn(async move {
                 let _permit = semaphore.acquire().await.unwrap();
-                download_assembly(&client, &assembly, pb).await
+                let result = download_assembly(&client, &assembly).await;
+                pb.lock().await.inc(1);
+                result
             })
         })
         .collect();
 
     future::join_all(tasks).await;
+
+    pb.lock()
+        .await
+        .finish_with_message(format!("Downloading {} assemblies", assemblies.len()));
 
     Ok(())
 }
