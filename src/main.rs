@@ -62,7 +62,7 @@ struct Args {
     assembly_level: Option<Vec<String>>,
 }
 
-#[derive(Clone, Debug, serde::Deserialize)]
+#[derive(Debug, serde::Deserialize)]
 struct NCBIAssembly {
     taxid: String,
     ftp_path: String,
@@ -274,8 +274,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     pb.lock().await.set_message("Downloading assemblies");
 
+    let n_assemblies = assemblies.len();
+
     let tasks: Vec<_> = assemblies
-        .clone()
         .into_iter()
         .map(|assembly| {
             let client = client.clone();
@@ -294,7 +295,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     pb.lock()
         .await
-        .finish_with_message(format!("Downloading {} assemblies", assemblies.len()));
+        .finish_with_message(format!("Downloading {n_assemblies} assemblies"));
 
     Ok(())
 }
