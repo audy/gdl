@@ -1,5 +1,7 @@
 # `gdl`
 
+[![Rust](https://github.com/audy/gdl/actions/workflows/rust.yml/badge.svg)](https://github.com/audy/gdl/actions/workflows/rust.yml)
+
 Genome Download
 
 A fast, command-line tool for downloading genome assemblies from NCBI. `gdl`
