@@ -39,9 +39,8 @@ struct Args {
     #[clap(short, long, default_value = "taxdump")]
     taxdump_path: String,
 
-    /// number of simultaneous downloads
-    #[clap(short, long, default_value_t = 4, value_parser = clap::value_parser!(u32))]
-    parallel: u32,
+    #[clap(short, long, default_value = "false")]
+    dry_run: bool,
 
     /*
     FILTERING PARAMETERS
@@ -209,15 +208,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     buf_reader.read_line(&mut first_line)?;
 
     let pb = ProgressBar::new(buf_reader.get_ref().metadata()?.len());
+    pb.set_style(ProgressStyle::with_template(PB_PROGRESS_TEMPLATE).unwrap());
+    pb.set_message("Filtering assemblies");
+
+    let wrapped_reader = pb.wrap_read(buf_reader);
 
     let mut reader = ReaderBuilder::new()
         .delimiter(b'\t')
         .has_headers(true)
-        .from_reader(buf_reader);
+        .from_reader(wrapped_reader);
 
     let mut assemblies: Vec<NCBIAssembly> = Vec::new();
-
-    pb.set_style(ProgressStyle::with_template(PB_SPINNER_TEMPLATE).unwrap());
 
     for result in reader.deserialize() {
         let assembly: NCBIAssembly = result?;
@@ -231,7 +232,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .contains(&assembly.assembly_level)))
         {
             assemblies.push(assembly);
-            pb.set_message(format!("found {} assemblies", assemblies.len()));
+            pb.set_message(format!("Found {} assemblies", assemblies.len()));
         }
     }
 
@@ -239,22 +240,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     pb.finish_with_message(format!("Found {n_assemblies} assemblies"));
 
-    // Download assemblies in parallel
-    let client = Client::new();
+    if !args.dry_run {
+        // Download assemblies in parallel
+        let client = Client::new();
 
-    let pb = ProgressBar::new(n_assemblies as u64);
-    pb.set_style(ProgressStyle::with_template(PB_PROGRESS_TEMPLATE).unwrap());
+        let pb = ProgressBar::new(n_assemblies as u64);
+        pb.set_style(ProgressStyle::with_template(PB_PROGRESS_TEMPLATE).unwrap());
+        pb.set_message("Downloading");
+        let _tasks: Vec<_> = assemblies
+            .par_iter()
+            .map(|assembly| {
+                let client = client.clone();
+                pb.inc(1);
+                let _ = download_assembly(&client, &assembly);
+            })
+            .collect();
 
-    let _tasks: Vec<_> = assemblies
-        .par_iter()
-        .map(|assembly| {
-            let client = client.clone();
-            pb.inc(1);
-            let _ = download_assembly(&client, &assembly);
-        })
-        .collect();
-
-    pb.finish_with_message("Assemblies downloaded");
+        pb.finish_with_message("Done");
+    }
 
     Ok(())
 }
