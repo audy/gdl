@@ -2,6 +2,7 @@ use clap::{ArgGroup, Parser};
 use csv::ReaderBuilder;
 use flate2::read::GzDecoder;
 use indicatif::{ProgressBar, ProgressStyle};
+use rayon::prelude::*;
 use reqwest::blocking::Client;
 use std::collections::HashSet;
 use std::error::Error;
@@ -245,7 +246,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     pb.set_style(ProgressStyle::with_template(PB_PROGRESS_TEMPLATE).unwrap());
 
     let _tasks: Vec<_> = assemblies
-        .into_iter()
+        .par_iter()
         .map(|assembly| {
             let client = client.clone();
             pb.inc(1);
