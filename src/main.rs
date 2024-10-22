@@ -160,13 +160,7 @@ fn download_assembly_summary(path: &str) -> Result<(), BoxedError> {
     Ok(())
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args = Args::parse();
-
-    // download taxonomy and assembly summary
-    let _ = download_and_extract_taxdump(&args.taxdump_path);
-    let _ = download_assembly_summary(&args.assembly_summary_path);
-
+fn load_taxonomy(taxdump_path: &str) -> GeneralTaxonomy {
     let pb = ProgressBar::new(0);
 
     pb.set_style(ProgressStyle::with_template(PB_SPINNER_TEMPLATE).unwrap());
@@ -181,33 +175,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    let tax = load(&args.taxdump_path)?;
-    pb.set_message(format!("Loaded {} taxa", Taxonomy::<&str>::len(&tax)));
+    let tax = load(taxdump_path).expect("Unable to load taxonomy");
+    pb.finish_with_message(format!("Loaded {} taxa", Taxonomy::<&str>::len(&tax)));
 
-    let tax_id: &str = get_tax_id(args.tax_id.as_deref(), args.tax_name.as_deref(), &tax)
-        .expect("Unable to find a tax ID");
+    tax
+}
 
-    let descendant_tax_ids: HashSet<&str> = tax.descendants(tax_id)?.into_iter().collect();
-
-    pb.finish_with_message(format!(
-        "Found {} descendants of {} ({})",
-        descendant_tax_ids.len(),
-        tax.name(tax_id)?,
-        tax_id
-    ));
-
+fn filter_assemblies(
+    assembly_summary_path: String,
+    // TODO: combine multiple with AND/OR?
+    filter_assembly_levels: Option<Vec<String>>,
+    filter_tax_ids: HashSet<&str>,
+) -> Vec<NCBIAssembly> {
     // filter assembly summaries
-    let assembly_summary_file = File::open(args.assembly_summary_path.clone())?;
-
-    // TODO: progress bar for ^^^
+    let assembly_summary_file =
+        File::open(assembly_summary_path).expect("Unable to open assembly summaries");
 
     // skip first line because it doesn't contain an actual header
     let mut buf_reader = BufReader::new(assembly_summary_file);
     let mut first_line = String::new();
-    // do we really have to read it _into_ something?
-    buf_reader.read_line(&mut first_line)?;
 
-    let pb = ProgressBar::new(buf_reader.get_ref().metadata()?.len());
+    buf_reader
+        .read_line(&mut first_line)
+        .expect("Unable to parse assembly summaries");
+
+    let pb = ProgressBar::new(
+        buf_reader
+            .get_ref()
+            .metadata()
+            .expect("Unable to get file size")
+            .len(),
+    );
     pb.set_style(ProgressStyle::with_template(PB_PROGRESS_TEMPLATE).unwrap());
     pb.set_message("Filtering assemblies");
 
@@ -221,12 +219,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut assemblies: Vec<NCBIAssembly> = Vec::new();
 
     for result in reader.deserialize() {
-        let assembly: NCBIAssembly = result?;
+        let assembly: NCBIAssembly = result.expect("Unable to parse");
 
-        if descendant_tax_ids.contains(&assembly.taxid.as_str())
-            && (args.assembly_level.is_none()
-                || (args
-                    .assembly_level
+        if filter_tax_ids.contains(&assembly.taxid.as_str())
+            && (filter_assembly_levels.is_none()
+                || (filter_assembly_levels
                     .as_ref()
                     .expect("Unable to parse assembly level")
                     .contains(&assembly.assembly_level)))
@@ -239,6 +236,43 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let n_assemblies = assemblies.len();
 
     pb.finish_with_message(format!("Found {n_assemblies} assemblies"));
+
+    assemblies
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args = Args::parse();
+
+    // download taxonomy and assembly summary
+    let _ = download_and_extract_taxdump(&args.taxdump_path);
+    let _ = download_assembly_summary(&args.assembly_summary_path);
+
+    let tax = load_taxonomy(&args.taxdump_path);
+
+    let tax_id: &str = get_tax_id(args.tax_id.as_deref(), args.tax_name.as_deref(), &tax)
+        .expect("Unable to find a tax ID");
+
+    let pb = ProgressBar::new(0);
+
+    pb.set_style(ProgressStyle::with_template(PB_SPINNER_TEMPLATE).unwrap());
+    pb.set_message("Loading taxonomy");
+
+    let descendant_tax_ids: HashSet<&str> = tax.descendants(tax_id)?.into_iter().collect();
+
+    pb.finish_with_message(format!(
+        "Found {} descendants of {} ({})",
+        descendant_tax_ids.len(),
+        tax.name(tax_id)?,
+        tax_id
+    ));
+
+    let assemblies = filter_assemblies(
+        args.assembly_summary_path,
+        args.assembly_level,
+        descendant_tax_ids,
+    );
+
+    let n_assemblies = assemblies.len();
 
     if !args.dry_run {
         // Download assemblies in parallel
