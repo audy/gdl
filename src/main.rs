@@ -6,7 +6,6 @@ use rayon::prelude::*;
 use rayon::ThreadPoolBuilder;
 use reqwest::blocking::Client;
 use std::collections::HashSet;
-use std::error::Error;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
 use std::path::Path;
@@ -81,24 +80,29 @@ struct NCBIAssembly {
     assembly_level: String,
 }
 
-// TODO: just use regular expect syntax
-type BoxedError = Box<dyn Error + Send + Sync + 'static>;
-
 // here we should re-use a single client to take advantage of keep-alive connection pooling
-fn download_assembly(client: &Client, assembly: &NCBIAssembly) -> Result<(), BoxedError> {
+fn download_assembly(client: &Client, assembly: &NCBIAssembly) -> String {
     // TODO: use a proper url parser
-    let last_part = assembly
-        .ftp_path
-        .split('/')
-        .last()
-        .expect("Failed to get the filename");
+    let last_part = assembly.ftp_path.split('/').last().expect(&format!(
+        "Failed to get the filename from FTP path {}",
+        assembly.ftp_path
+    ));
     let url = format!("{}/{}_genomic.fna.gz", assembly.ftp_path, last_part);
 
-    let mut file = File::create(format!("{}.fna.gz", last_part))?;
-    let mut response = client.get(url).send()?;
-    response.copy_to(&mut file)?;
+    let assembly_path = format!("{}.fna.gz", last_part);
 
-    Ok(())
+    let mut file =
+        File::create(&assembly_path).expect(&format!("Unable to write to {}", assembly_path));
+    let mut response = client
+        .get(&url)
+        .send()
+        .expect(&format!("Error fetching data from {}", url));
+
+    response
+        .copy_to(&mut file)
+        .expect(&format!("Unable to write to {}", assembly_path));
+
+    assembly_path
 }
 
 fn get_tax_id<'a>(
@@ -113,9 +117,11 @@ fn get_tax_id<'a>(
             let matches = tax.find_all_by_name(tax_name);
             match matches.len() {
                 0 => Err("No matches found"),
-                1 => Ok(matches.first().expect("No tax ID?")),
+                1 => Ok(matches
+                    .first()
+                    .expect(&format!("No tax ID found for name {}", tax_name))),
                 // TODO: show matched lineages and their tax IDs to help the user disambiguate
-                _ => Err("Ambiguous Name!"),
+                _ => Err("Name is ambiguous"),
             }
         }
         _ => Err("Either --tax-id or --tax-name must be provided, but not both"),
@@ -129,10 +135,10 @@ fn download_and_extract_taxdump(path: &str) {
     let pb = ProgressBar::new(0);
     pb.set_message("Fetching taxonomy");
 
-    let mut response = client
-        .get(TAXDUMP_URL)
-        .send()
-        .expect("Unable to fetch NCBI taxonomy dump");
+    let mut response = client.get(TAXDUMP_URL).send().expect(&format!(
+        "Unable to fetch NCBI taxonomy dump from {}",
+        TAXDUMP_URL
+    ));
     let mut file = File::create("taxdump.tar.gz").expect("Unable to read taxdump.tar.gz");
 
     let _ = response.copy_to(&mut file);
@@ -142,7 +148,7 @@ fn download_and_extract_taxdump(path: &str) {
     let decompressed = GzDecoder::new(tar_gz);
     let mut archive = Archive::new(decompressed);
 
-    std::fs::create_dir_all(path).expect("Unable to create taxdump");
+    std::fs::create_dir_all(path).expect(&format!("Unable to create taxdump output dir: {}", path));
     archive
         .unpack(path)
         .expect("Unable to extract taxdump.tar.gz");
@@ -155,12 +161,12 @@ fn download_and_extract_taxdump(path: &str) {
 fn download_assembly_summary(path: &str) {
     // TODO: re-use existing Client
     let client = Client::new();
-    let mut response = client
-        .get(ASSEMBLY_SUMMARY_URL)
-        .send()
-        .expect("Unable to fetch assembly summary");
+    let mut response = client.get(ASSEMBLY_SUMMARY_URL).send().expect(&format!(
+        "Unable to fetch assembly summary from {}",
+        ASSEMBLY_SUMMARY_URL
+    ));
 
-    let mut file = File::create(path).expect("Unable to read assembly summary");
+    let mut file = File::create(path).expect(&format!("Unable to read assembly summary {}", path));
     let _ = response.copy_to(&mut file);
 
     let pb = ProgressBar::new(0);
@@ -190,7 +196,7 @@ fn load_taxonomy(taxdump_path: &str) -> GeneralTaxonomy {
         }
     });
 
-    let tax = load(taxdump_path).expect("Unable to load taxonomy");
+    let tax = load(taxdump_path).expect(&format!("Unable to load taxdump from {}", taxdump_path));
     pb.finish_with_message(format!("Loaded {} taxa", Taxonomy::<&str>::len(&tax)));
 
     tax
@@ -203,8 +209,10 @@ fn filter_assemblies(
     filter_tax_ids: HashSet<&str>,
 ) -> Vec<NCBIAssembly> {
     // filter assembly summaries
-    let assembly_summary_file =
-        File::open(assembly_summary_path).expect("Unable to open assembly summaries");
+    let assembly_summary_file = File::open(&assembly_summary_path).expect(&format!(
+        "Unable to open assembly summary path {}",
+        assembly_summary_path
+    ));
 
     // skip first line because it doesn't contain an actual header
     let mut buf_reader = BufReader::new(assembly_summary_file);
@@ -234,7 +242,7 @@ fn filter_assemblies(
     let mut assemblies: Vec<NCBIAssembly> = Vec::new();
 
     for result in reader.deserialize() {
-        let assembly: NCBIAssembly = result.expect("Unable to parse");
+        let assembly: NCBIAssembly = result.expect("Unable to parse assembly summary line");
 
         if filter_tax_ids.contains(&assembly.taxid.as_str())
             && (filter_assembly_levels.is_none()
@@ -255,7 +263,7 @@ fn filter_assemblies(
     assemblies
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() {
     let args = Args::parse();
 
     // download taxonomy and assembly summary
@@ -281,7 +289,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let descendant_tax_ids: HashSet<&str> = if args.no_children {
         [tax_id].into()
     } else {
-        tax.descendants(tax_id)?
+        tax.descendants(tax_id)
+            .expect(&format!(
+                "Unable to find taxonomic descendants for tax ID {}",
+                tax_id
+            ))
             .into_iter()
             .chain([tax_id])
             .collect()
@@ -290,7 +302,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     pb.finish_with_message(format!(
         "Filtering to {} tax IDs for {} ({})",
         descendant_tax_ids.len(),
-        tax.name(tax_id)?,
+        tax.name(tax_id).expect("Unable to get name for tax ID"),
         tax_id
     ));
 
@@ -305,7 +317,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // setup threadpool using --parallel
     ThreadPoolBuilder::new()
         .num_threads(args.parallel)
-        .build_global()?;
+        .build_global()
+        .expect("Unable to build thread pool");
 
     if !args.dry_run {
         // Download assemblies in parallel
@@ -325,6 +338,4 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         pb.finish_with_message("Done");
     }
-
-    Ok(())
 }
