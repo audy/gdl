@@ -17,7 +17,7 @@ use taxonomy::{GeneralTaxonomy, Taxonomy};
 
 const TAXDUMP_URL: &str = "https://ftp.ncbi.nih.gov/pub/taxonomy/taxdump.tar.gz";
 const ASSEMBLY_SUMMARY_URL: &str =
-    "https://ftp.ncbi.nlm.nih.gov/genomes/ASSEMBLY_REPORTS/assembly_summary_genbank.txt";
+    "https://ftp.ncbi.nlm.nih.gov/genomes/ASSEMBLY_REPORTS/assembly_summary_refseq.txt";
 
 const PB_DOWNLOAD_TEMPLATE: &str =
     "{msg} [{elapsed_precise}] [{bar:.white/green}] {bytes}/{total_bytes}";
@@ -32,7 +32,7 @@ const PB_SPINNER_TEMPLATE: &str = "{spinner:.green} {msg}";
 ))]
 struct Args {
     /// path to assembly_summary.txt
-    #[clap(short, long, default_value = "assembly_summary_genbank.txt")]
+    #[clap(short, long, default_value = "assembly_summary_refseq.txt")]
     assembly_summary_path: String,
 
     /// path to extracted taxdump.tar.gz
