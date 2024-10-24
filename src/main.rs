@@ -3,6 +3,7 @@ use csv::ReaderBuilder;
 use flate2::read::GzDecoder;
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
+use rayon::ThreadPoolBuilder;
 use reqwest::blocking::Client;
 use std::collections::HashSet;
 use std::error::Error;
@@ -46,6 +47,9 @@ struct Args {
     /// re-fetch assembly_summary.txt and taxdump
     #[clap(short, long, default_value = "false")]
     no_cache: bool,
+
+    #[clap(short, long, default_value = "1")]
+    parallel: usize,
 
     /*
     FILTERING PARAMETERS
@@ -297,6 +301,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let n_assemblies = assemblies.len();
+
+    // setup threadpool using --parallel
+    ThreadPoolBuilder::new()
+        .num_threads(args.parallel)
+        .build_global()?;
 
     if !args.dry_run {
         // Download assemblies in parallel
