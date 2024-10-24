@@ -39,8 +39,13 @@ struct Args {
     #[clap(short, long, default_value = "taxdump")]
     taxdump_path: String,
 
+    /// do not actually download anything
     #[clap(short, long, default_value = "false")]
     dry_run: bool,
+
+    /// re-fetch assembly_summary.txt and taxdump
+    #[clap(short, long, default_value = "false")]
+    no_cache: bool,
 
     /*
     FILTERING PARAMETERS
@@ -72,6 +77,7 @@ struct NCBIAssembly {
     assembly_level: String,
 }
 
+// TODO: just use regular expect syntax
 type BoxedError = Box<dyn Error + Send + Sync + 'static>;
 
 // here we should re-use a single client to take advantage of keep-alive connection pooling
@@ -112,45 +118,45 @@ fn get_tax_id<'a>(
     }
 }
 
-fn download_and_extract_taxdump(path: &str) -> Result<(), BoxedError> {
-    if Path::new(path).exists() {
-        return Ok(());
-    }
-
+fn download_and_extract_taxdump(path: &str) {
     // TODO recycle client for Keep Alive
     let client = Client::new();
 
     let pb = ProgressBar::new(0);
     pb.set_message("Fetching taxonomy");
 
-    let mut response = client.get(TAXDUMP_URL).send()?;
-    let mut file = File::create("taxdump.tar.gz")?;
+    let mut response = client
+        .get(TAXDUMP_URL)
+        .send()
+        .expect("Unable to fetch NCBI taxonomy dump");
+    let mut file = File::create("taxdump.tar.gz").expect("Unable to read taxdump.tar.gz");
 
     let _ = response.copy_to(&mut file);
 
     pb.set_message("Extracting taxonomy");
-    let tar_gz = File::open("taxdump.tar.gz")?;
+    let tar_gz = File::open("taxdump.tar.gz").expect("Unable to open taxdump.tar.gz");
     let decompressed = GzDecoder::new(tar_gz);
     let mut archive = Archive::new(decompressed);
-    std::fs::create_dir_all(path)?;
-    archive.unpack(path)?;
-    fs::remove_file("taxdump.tar.gz")?;
+
+    std::fs::create_dir_all(path).expect("Unable to create taxdump");
+    archive
+        .unpack(path)
+        .expect("Unable to extract taxdump.tar.gz");
+
+    fs::remove_file("taxdump.tar.gz").expect("Unable to remove taxdump.tar.gz");
 
     pb.finish_and_clear();
-
-    Ok(())
 }
 
-fn download_assembly_summary(path: &str) -> Result<(), BoxedError> {
-    if Path::new(path).exists() {
-        return Ok(());
-    }
-
+fn download_assembly_summary(path: &str) {
     // TODO: re-use existing Client
     let client = Client::new();
-    let mut response = client.get(ASSEMBLY_SUMMARY_URL).send()?;
+    let mut response = client
+        .get(ASSEMBLY_SUMMARY_URL)
+        .send()
+        .expect("Unable to fetch assembly summary");
 
-    let mut file = File::create(path)?;
+    let mut file = File::create(path).expect("Unable to read assembly summary");
     let _ = response.copy_to(&mut file);
 
     let pb = ProgressBar::new(0);
@@ -163,7 +169,6 @@ fn download_assembly_summary(path: &str) -> Result<(), BoxedError> {
     pb.set_message("Fetching assembly summary");
 
     pb.finish_and_clear();
-    Ok(())
 }
 
 fn load_taxonomy(taxdump_path: &str) -> GeneralTaxonomy {
@@ -250,8 +255,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
     // download taxonomy and assembly summary
-    let _ = download_and_extract_taxdump(&args.taxdump_path);
-    let _ = download_assembly_summary(&args.assembly_summary_path);
+
+    if args.no_cache || !Path::new(&args.taxdump_path).exists() {
+        download_and_extract_taxdump(&args.taxdump_path);
+    }
+
+    if args.no_cache || !Path::new(&args.assembly_summary_path).exists() {
+        download_assembly_summary(&args.assembly_summary_path);
+    }
 
     let tax = load_taxonomy(&args.taxdump_path);
 
