@@ -48,6 +48,12 @@ struct Args {
     /// tax_id to download assemblies for (includes descendants)
     #[clap(short, long)]
     tax_id: Option<String>, // should this be an int (for validation)
+
+    /// do not include child tax IDs of --tax-id (only download assemblies that have the same tax
+    /// ID as provided by --tax-id)
+    #[clap(short, long, default_value = "false")]
+    no_children: bool,
+
     /// tax_name to download assemblies for (includes descendants)
     #[clap(short, long)]
     tax_name: Option<String>,
@@ -257,10 +263,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     pb.set_style(ProgressStyle::with_template(PB_SPINNER_TEMPLATE).unwrap());
     pb.set_message("Loading taxonomy");
 
-    let descendant_tax_ids: HashSet<&str> = tax.descendants(tax_id)?.into_iter().collect();
+    let descendant_tax_ids: HashSet<&str> = if args.no_children {
+        [tax_id].into()
+    } else {
+        tax.descendants(tax_id)?
+            .into_iter()
+            .chain([tax_id])
+            .collect()
+    };
 
     pb.finish_with_message(format!(
-        "Found {} descendants of {} ({})",
+        "Filtering to {} tax IDs for {} ({})",
         descendant_tax_ids.len(),
         tax.name(tax_id)?,
         tax_id
