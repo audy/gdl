@@ -19,10 +19,10 @@ const TAXDUMP_URL: &str = "https://ftp.ncbi.nih.gov/pub/taxonomy/taxdump.tar.gz"
 const ASSEMBLY_SUMMARY_URL: &str =
     "https://ftp.ncbi.nlm.nih.gov/genomes/ASSEMBLY_REPORTS/assembly_summary_refseq.txt";
 
-const PB_DOWNLOAD_TEMPLATE: &str =
-    "{msg} [{elapsed_precise}] [{bar:.white/green}] {bytes}/{total_bytes}";
-const PB_PROGRESS_TEMPLATE: &str = "{msg} [{elapsed_precise}] [{bar:.white/green}] {pos}/{len}";
-const PB_SPINNER_TEMPLATE: &str = "{spinner:.green} {msg}";
+const PB_DOWNLOAD_TEMPLATE: &str = "{msg:>30} [{bar:.magenta}] {bytes}/{total_bytes} [{elapsed}]";
+const PB_PROGRESS_TEMPLATE: &str = "{msg:>30} [{bar:.magenta}] {percent}% [{elapsed}]";
+const PB_SPINNER_TEMPLATE: &str = "{msg:>30} {spinner:.magenta}";
+const PROGRESS_CHARS: &str = "█▉▊▋▌▍▎▏  ";
 
 #[derive(Parser, Debug)]
 #[command(group(
@@ -129,19 +129,26 @@ fn get_tax_id<'a>(
 }
 
 fn download_and_extract_taxdump(path: &str) {
-    // TODO recycle client for Keep Alive
     let client = Client::new();
-
-    let pb = ProgressBar::new(0);
-    pb.set_message("Fetching taxonomy");
-
     let mut response = client.get(TAXDUMP_URL).send().expect(&format!(
         "Unable to fetch NCBI taxonomy dump from {}",
         TAXDUMP_URL
     ));
-    let mut file = File::create("taxdump.tar.gz").expect("Unable to read taxdump.tar.gz");
 
-    let _ = response.copy_to(&mut file);
+    let content_length = response.content_length().unwrap_or(0);
+
+    let pb = ProgressBar::new(content_length);
+    pb.set_style(
+        ProgressStyle::with_template(PB_DOWNLOAD_TEMPLATE)
+            .unwrap()
+            .progress_chars(PROGRESS_CHARS),
+    );
+    pb.set_message("Fetching taxonomy");
+
+    let file = File::create("taxdump.tar.gz").expect("Unable to read taxdump.tar.gz");
+    let mut wrapped_file = pb.wrap_write(file);
+
+    let _ = response.copy_to(&mut wrapped_file);
 
     pb.set_message("Extracting taxonomy");
     let tar_gz = File::open("taxdump.tar.gz").expect("Unable to open taxdump.tar.gz");
@@ -155,7 +162,7 @@ fn download_and_extract_taxdump(path: &str) {
 
     fs::remove_file("taxdump.tar.gz").expect("Unable to remove taxdump.tar.gz");
 
-    pb.finish_and_clear();
+    pb.finish_with_message("Fetched taxonomy");
 }
 
 fn download_assembly_summary(path: &str) {
@@ -166,38 +173,27 @@ fn download_assembly_summary(path: &str) {
         ASSEMBLY_SUMMARY_URL
     ));
 
-    let mut file = File::create(path).expect(&format!("Unable to read assembly summary {}", path));
-    let _ = response.copy_to(&mut file);
+    let content_length = response.content_length().unwrap_or(0);
 
-    let pb = ProgressBar::new(0);
+    let pb = ProgressBar::new(content_length);
     pb.set_style(
         ProgressStyle::with_template(PB_DOWNLOAD_TEMPLATE)
             .unwrap()
-            .progress_chars("#>-"),
+            .progress_chars(PROGRESS_CHARS),
     );
 
-    pb.set_message("Fetching assembly summary");
+    pb.set_message("Fetching summaries");
 
-    pb.finish_and_clear();
+    let file = File::create(path).expect(&format!("Unable to open assembly summary {}", path));
+    let mut wrapped_file = pb.wrap_write(file);
+
+    let _ = response.copy_to(&mut wrapped_file);
+
+    pb.finish_with_message("Fetched assembly summaries");
 }
 
 fn load_taxonomy(taxdump_path: &str) -> GeneralTaxonomy {
-    let pb = ProgressBar::new(0);
-
-    pb.set_style(ProgressStyle::with_template(PB_SPINNER_TEMPLATE).unwrap());
-    pb.set_message("Loading taxonomy");
-
-    // Spawn a separate thread to tick the spinner
-    let pb_clone = pb.clone();
-    thread::spawn(move || {
-        while !pb_clone.is_finished() {
-            pb_clone.tick();
-            thread::sleep(Duration::from_millis(100));
-        }
-    });
-
     let tax = load(taxdump_path).expect(&format!("Unable to load taxdump from {}", taxdump_path));
-    pb.finish_with_message(format!("Loaded {} taxa", Taxonomy::<&str>::len(&tax)));
 
     tax
 }
@@ -229,7 +225,11 @@ fn filter_assemblies(
             .expect("Unable to get file size")
             .len(),
     );
-    pb.set_style(ProgressStyle::with_template(PB_PROGRESS_TEMPLATE).unwrap());
+    pb.set_style(
+        ProgressStyle::with_template(PB_PROGRESS_TEMPLATE)
+            .unwrap()
+            .progress_chars(PROGRESS_CHARS),
+    );
     pb.set_message("Filtering assemblies");
 
     let wrapped_reader = pb.wrap_read(buf_reader);
@@ -267,7 +267,7 @@ fn main() {
     let args = Args::parse();
 
     // download taxonomy and assembly summary
-
+    // TODO: do these things in parallel?
     if args.no_cache || !Path::new(&args.taxdump_path).exists() {
         download_and_extract_taxdump(&args.taxdump_path);
     }
@@ -276,15 +276,25 @@ fn main() {
         download_assembly_summary(&args.assembly_summary_path);
     }
 
+    let pb = ProgressBar::new(0);
+    pb.set_style(ProgressStyle::with_template(PB_SPINNER_TEMPLATE).unwrap());
+    pb.set_message("Loading taxonomy");
+
+    // Spawn a separate thread to tick the spinner
+    let pb_clone = pb.clone();
+    thread::spawn(move || {
+        while !pb_clone.is_finished() {
+            pb_clone.tick();
+            thread::sleep(Duration::from_millis(100));
+        }
+    });
+
     let tax = load_taxonomy(&args.taxdump_path);
 
     let tax_id: &str = get_tax_id(args.tax_id.as_deref(), args.tax_name.as_deref(), &tax)
         .expect("Unable to find a tax ID");
 
-    let pb = ProgressBar::new(0);
-
-    pb.set_style(ProgressStyle::with_template(PB_SPINNER_TEMPLATE).unwrap());
-    pb.set_message("Loading taxonomy");
+    pb.set_message("Finding descendants");
 
     let descendant_tax_ids: HashSet<&str> = if args.no_children {
         [tax_id].into()
@@ -300,7 +310,7 @@ fn main() {
     };
 
     pb.finish_with_message(format!(
-        "Filtering to {} tax IDs for {} ({})",
+        "Found {} tax IDs for {} ({})",
         descendant_tax_ids.len(),
         tax.name(tax_id).expect("Unable to get name for tax ID"),
         tax_id
