@@ -1,4 +1,4 @@
-use clap::{ArgGroup, Parser};
+use clap::{ArgGroup, Parser, ValueEnum};
 use csv::ReaderBuilder;
 use flate2::read::GzDecoder;
 use indicatif::{ProgressBar, ProgressState, ProgressStyle};
@@ -54,6 +54,12 @@ struct Args {
     parallel: usize,
 
     /*
+    FORMAT OPTIONS
+    */
+    #[clap(value_enum, short, long, default_value_t = AssemblyFormat::Fna)]
+    format: AssemblyFormat, // TODO: map to enum? Allow passing multiple?
+
+    /*
     FILTERING PARAMETERS
     */
     /// tax_id to download assemblies for (includes descendants)
@@ -83,19 +89,46 @@ struct NCBIAssembly {
     assembly_level: String,
 }
 
+#[derive(ValueEnum, Clone, Debug)]
+#[clap(rename_all = "lowercase")]
+enum AssemblyFormat {
+    Fna,
+    Faa,
+    Gbk,
+    Gff,
+}
+
+impl AssemblyFormat {
+    fn as_str(&self) -> &'static str {
+        match self {
+            AssemblyFormat::Fna => "fna",
+            AssemblyFormat::Faa => "faa",
+            AssemblyFormat::Gbk => "gbk",
+            AssemblyFormat::Gff => "gff",
+        }
+    }
+}
+
 // here we should re-use a single client to take advantage of keep-alive connection pooling
-fn download_assembly(client: &Client, assembly: &NCBIAssembly) -> String {
+fn download_assembly(client: &Client, assembly: &NCBIAssembly, format: &AssemblyFormat) -> String {
     // TODO: use a proper url parser
     let last_part = assembly.ftp_path.split('/').last().expect(&format!(
         "Failed to get the filename from FTP path {}",
         assembly.ftp_path
     ));
-    let url = format!("{}/{}_genomic.fna.gz", assembly.ftp_path, last_part);
 
-    let assembly_path = format!("{}.fna.gz", last_part);
+    let url = format!(
+        "{}/{}_genomic.{}.gz",
+        assembly.ftp_path,
+        last_part,
+        format.as_str()
+    );
+
+    let assembly_path = format!("{}.{}.gz", last_part, format.as_str());
 
     let mut file =
         File::create(&assembly_path).expect(&format!("Unable to write to {}", assembly_path));
+
     let mut response = client
         .get(&url)
         .send()
@@ -345,7 +378,7 @@ fn main() {
             .map(|assembly| {
                 let client = client.clone();
                 pb.inc(1);
-                let _ = download_assembly(&client, &assembly);
+                let _ = download_assembly(&client, &assembly, &args.format);
             })
             .collect();
 

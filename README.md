@@ -25,13 +25,21 @@ Usage: gdl [OPTIONS] <--tax-id <TAX_ID>|--tax-name <TAX_NAME>>
 
 Options:
   -a, --assembly-summary-path <ASSEMBLY_SUMMARY_PATH>
-          path to assembly_summary.txt [default: assembly_summary_genbank.txt]
+          path to assembly_summary.txt [default: assembly_summary_refseq.txt]
   -t, --taxdump-path <TAXDUMP_PATH>
           path to extracted taxdump.tar.gz [default: taxdump]
   -d, --dry-run
-
+          do not actually download anything
+  -n, --no-cache
+          re-fetch assembly_summary.txt and taxdump
+  -p, --parallel <PARALLEL>
+          [default: 1]
+  -f, --format <FORMAT>
+          [default: fna] [possible values: fna, faa, gbk, gff]
   -t, --tax-id <TAX_ID>
           tax_id to download assemblies for (includes descendants)
+  -n, --no-children
+          do not include child tax IDs of --tax-id (only download assemblies that have the same tax ID as provided by --tax-id)
   -t, --tax-name <TAX_NAME>
           tax_name to download assemblies for (includes descendants)
   -a, --assembly-level <ASSEMBLY_LEVEL>
