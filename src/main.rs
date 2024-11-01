@@ -62,7 +62,7 @@ struct Args {
     /*
     FILTERING PARAMETERS
     */
-    /// tax_id to download assemblies for (includes descendants)
+    /// tax_id to download assemblies for (includes descendants unless --no-children is enabled)
     #[clap(short, long)]
     tax_id: Option<String>, // should this be an int (for validation)
 
@@ -71,7 +71,7 @@ struct Args {
     #[clap(short, long, default_value = "false")]
     no_children: bool,
 
-    /// tax_name to download assemblies for (includes descendants)
+    /// tax_name to download assemblies for (includes descendants unless --no-children is enabled)
     #[clap(short, long)]
     tax_name: Option<String>,
 
