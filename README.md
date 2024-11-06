@@ -1,22 +1,25 @@
-# `gdl`
+# `gdl` - Genome Download
 
 [![Rust](https://github.com/audy/gdl/actions/workflows/rust.yml/badge.svg)](https://github.com/audy/gdl/actions/workflows/rust.yml)
 
-Genome Download
-
 A fast, command-line tool for downloading genome assemblies from NCBI. `gdl`
-aims to be fast, easy to use, and fast.
+aims to be fast and easy to use.
 
 ## Features
 
-- Taxonomy-aware: can fetch all genomes for any node on the NCBI taxonomy tree
-- Efficient: starts downloading immediately. No need to pre-fetch thousands of
-  unrelated `MD5SUM` files before downloading the first assembly. Written in
-  Rust so very low memory consumption
+- Taxonomy-aware: Fetch all genomes for any node on the NCBI taxonomy tree
+  (E.g., fetch all assemblies under the family Enterobacteriaceae)
+- Fast: Runs in parallel and is X to Y times faster than other tools
 
 ## Installation
 
-TODO
+### From Source
+
+```sh
+git clone ...
+cargo build --release
+(sudo) cp target/release/gdl /usr/local/bin/
+```
 
 ## Usage
 
@@ -24,25 +27,27 @@ TODO
 Usage: gdl [OPTIONS] <--tax-id <TAX_ID>|--tax-name <TAX_NAME>>
 
 Options:
-  -a, --assembly-summary-path <ASSEMBLY_SUMMARY_PATH>
+      --assembly-summary-path <ASSEMBLY_SUMMARY_PATH>
           path to assembly_summary.txt [default: assembly_summary_refseq.txt]
-  -t, --taxdump-path <TAXDUMP_PATH>
+      --taxdump-path <TAXDUMP_PATH>
           path to extracted taxdump.tar.gz [default: taxdump]
-  -d, --dry-run
+      --dry-run
           do not actually download anything
-  -n, --no-cache
+      --no-cache
           re-fetch assembly_summary.txt and taxdump
-  -p, --parallel <PARALLEL>
+      --parallel <PARALLEL>
           [default: 1]
-  -f, --format <FORMAT>
+      --format <FORMAT>
           [default: fna] [possible values: fna, faa, gbk, gff]
-  -t, --tax-id <TAX_ID>
-          tax_id to download assemblies for (includes descendants)
-  -n, --no-children
+      --out-dir <OUT_DIR>
+          output directory, default=pwd
+      --tax-id <TAX_ID>
+          tax_id to download assemblies for (includes descendants unless --no-children is enabled)
+      --no-children
           do not include child tax IDs of --tax-id (only download assemblies that have the same tax ID as provided by --tax-id)
-  -t, --tax-name <TAX_NAME>
-          tax_name to download assemblies for (includes descendants)
-  -a, --assembly-level <ASSEMBLY_LEVEL>
+      --tax-name <TAX_NAME>
+          tax_name to download assemblies for (includes descendants unless --no-children is enabled)
+      --assembly-level <ASSEMBLY_LEVEL>
           include assemblies that match this assembly level. can be used multiple times by default, all assembly_levels are included
   -h, --help
           Print help
@@ -60,10 +65,9 @@ gdl --tax-id 562 --format gff
 
 # TODO
 
-0. Benchmarks
-1. `--format` - fasta, genbank, gff, ...
-2. `--out-dir`
 3. `--cache-dir` - where to store the NCBI tax dump and `assembly_summary.txt`
 4. `--repository` - either GenBank or RefSeq (default is GenBank)
 5. `--no-clobber` - do not overwrite existing files
 6. `--verify` - download and check MD5SUM files
+
+- Atomic downloads (don't save partially downloaded files if interrupted)

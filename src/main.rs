@@ -9,7 +9,7 @@ use std::collections::HashSet;
 use std::fmt::Write;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Duration;
 use tar::Archive;
@@ -35,49 +35,53 @@ const PROGRESS_CHARS: &str = "█░ ";
 ))]
 struct Args {
     /// path to assembly_summary.txt
-    #[clap(short, long, default_value = "assembly_summary_refseq.txt")]
+    #[clap(long, default_value = "assembly_summary_refseq.txt")]
     assembly_summary_path: String,
 
     /// path to extracted taxdump.tar.gz
-    #[clap(short, long, default_value = "taxdump")]
+    #[clap(long, default_value = "taxdump")]
     taxdump_path: String,
 
     /// do not actually download anything
-    #[clap(short, long, default_value = "false")]
+    #[clap(long, default_value = "false")]
     dry_run: bool,
 
     /// re-fetch assembly_summary.txt and taxdump
-    #[clap(short, long, default_value = "false")]
+    #[clap(long, default_value = "false")]
     no_cache: bool,
 
-    #[clap(short, long, default_value = "1")]
+    #[clap(long, default_value = "1")]
     parallel: usize,
 
     /*
-    FORMAT OPTIONS
+    OUTPUT OPTIONS
     */
-    #[clap(value_enum, short, long, default_value_t = AssemblyFormat::Fna)]
-    format: AssemblyFormat, // TODO: map to enum? Allow passing multiple?
+    #[clap(value_enum, long, default_value_t = AssemblyFormat::Fna)]
+    format: AssemblyFormat,
+
+    /// output directory, default=pwd
+    #[clap(long)]
+    out_dir: Option<String>,
 
     /*
     FILTERING PARAMETERS
     */
     /// tax_id to download assemblies for (includes descendants unless --no-children is enabled)
-    #[clap(short, long)]
+    #[clap(long)]
     tax_id: Option<String>, // should this be an int (for validation)
 
     /// do not include child tax IDs of --tax-id (only download assemblies that have the same tax
     /// ID as provided by --tax-id)
-    #[clap(short, long, default_value = "false")]
+    #[clap(long, default_value = "false")]
     no_children: bool,
 
     /// tax_name to download assemblies for (includes descendants unless --no-children is enabled)
-    #[clap(short, long)]
+    #[clap(long)]
     tax_name: Option<String>,
 
     /// include assemblies that match this assembly level. can be used multiple times
     /// by default, all assembly_levels are included
-    #[clap(short, long)]
+    #[clap(long)]
     assembly_level: Option<Vec<String>>,
 }
 
@@ -110,7 +114,12 @@ impl AssemblyFormat {
 }
 
 // here we should re-use a single client to take advantage of keep-alive connection pooling
-fn download_assembly(client: &Client, assembly: &NCBIAssembly, format: &AssemblyFormat) -> String {
+fn download_assembly(
+    client: &Client,
+    assembly: &NCBIAssembly,
+    format: &AssemblyFormat,
+    out_path: &Path,
+) -> PathBuf {
     // TODO: use a proper url parser
     let last_part = assembly.ftp_path.split('/').last().expect(&format!(
         "Failed to get the filename from FTP path {}",
@@ -124,10 +133,11 @@ fn download_assembly(client: &Client, assembly: &NCBIAssembly, format: &Assembly
         format.as_str()
     );
 
-    let assembly_path = format!("{}.{}.gz", last_part, format.as_str());
+    let assembly_filename = format!("{}.{}.gz", last_part, format.as_str());
+    let assembly_path = out_path.join(assembly_filename);
 
-    let mut file =
-        File::create(&assembly_path).expect(&format!("Unable to write to {}", assembly_path));
+    let mut file = File::create(&assembly_path)
+        .expect(&format!("Unable to write to {}", assembly_path.display()));
 
     let mut response = client
         .get(&url)
@@ -136,7 +146,7 @@ fn download_assembly(client: &Client, assembly: &NCBIAssembly, format: &Assembly
 
     response
         .copy_to(&mut file)
-        .expect(&format!("Unable to write to {}", assembly_path));
+        .expect(&format!("Unable to write to {}", assembly_path.display()));
 
     assembly_path
 }
@@ -359,6 +369,13 @@ fn main() {
         .build_global()
         .expect("Unable to build thread pool");
 
+    let out_dir = args.out_dir.unwrap_or(".".to_string());
+    let out_path = Path::new(&out_dir);
+
+    if !out_path.exists() {
+        fs::create_dir_all(out_path).expect("Unable to create path");
+    }
+
     if !args.dry_run {
         // Download assemblies in parallel
         let client = Client::new();
@@ -378,7 +395,7 @@ fn main() {
             .map(|assembly| {
                 let client = client.clone();
                 pb.inc(1);
-                let _ = download_assembly(&client, &assembly, &args.format);
+                let _ = download_assembly(&client, &assembly, &args.format, &out_path);
             })
             .collect();
 
