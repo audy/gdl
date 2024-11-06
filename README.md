@@ -27,8 +27,6 @@ cargo build --release
 Usage: gdl [OPTIONS] <--tax-id <TAX_ID>|--tax-name <TAX_NAME>>
 
 Options:
-      --assembly-summary-path <ASSEMBLY_SUMMARY_PATH>
-          path to assembly_summary.txt [default: assembly_summary_refseq.txt]
       --taxdump-path <TAXDUMP_PATH>
           path to extracted taxdump.tar.gz [default: taxdump]
       --dry-run
@@ -41,6 +39,10 @@ Options:
           [default: fna] [possible values: fna, faa, gbk, gff]
       --out-dir <OUT_DIR>
           output directory, default=pwd
+      --source <SOURCE>
+          where to fetch assemblies from (default is RefSeq) [default: none] [possible values: genbank, refseq, none]
+      --assembly-summary-path <ASSEMBLY_SUMMARY_PATH>
+          path to assembly_summary.txt
       --tax-id <TAX_ID>
           tax_id to download assemblies for (includes descendants unless --no-children is enabled)
       --no-children
@@ -52,6 +54,7 @@ Options:
   -h, --help
           Print help
 ```
+
 
 ### Examples
 
