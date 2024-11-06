@@ -17,8 +17,6 @@ use taxonomy::ncbi::load;
 use taxonomy::{GeneralTaxonomy, Taxonomy};
 
 const TAXDUMP_URL: &str = "https://ftp.ncbi.nih.gov/pub/taxonomy/taxdump.tar.gz";
-const ASSEMBLY_SUMMARY_URL: &str =
-    "https://ftp.ncbi.nlm.nih.gov/genomes/ASSEMBLY_REPORTS/assembly_summary_refseq.txt";
 
 const PB_DOWNLOAD_TEMPLATE: &str =
     "[{elapsed:.cyan}] {msg:>25} [{bar:.green}] {bytes:.blue}/{total_bytes:.blue}";
@@ -34,10 +32,6 @@ const PROGRESS_CHARS: &str = "█░ ";
         .args(&["tax_id", "tax_name"])
 ))]
 struct Args {
-    /// path to assembly_summary.txt
-    #[clap(long, default_value = "assembly_summary_refseq.txt")]
-    assembly_summary_path: String,
-
     /// path to extracted taxdump.tar.gz
     #[clap(long, default_value = "taxdump")]
     taxdump_path: String,
@@ -66,6 +60,14 @@ struct Args {
     /*
     FILTERING PARAMETERS
     */
+    /// where to fetch assemblies from (default is RefSeq)
+    #[clap(value_enum, long, default_value_t = AssemblySource::None)]
+    source: AssemblySource,
+
+    /// path to assembly_summary.txt
+    #[clap(long)]
+    assembly_summary_path: Option<String>,
+
     /// tax_id to download assemblies for (includes descendants unless --no-children is enabled)
     #[clap(long)]
     tax_id: Option<String>, // should this be an int (for validation)
@@ -109,6 +111,35 @@ impl AssemblyFormat {
             AssemblyFormat::Faa => "faa",
             AssemblyFormat::Gbk => "gbk",
             AssemblyFormat::Gff => "gff",
+        }
+    }
+}
+
+#[derive(ValueEnum, Clone, Debug)]
+enum AssemblySource {
+    Genbank,
+    Refseq,
+    None,
+}
+
+impl AssemblySource {
+    fn as_str(&self) -> &'static str {
+        match self {
+            AssemblySource::Genbank => "genbank",
+            AssemblySource::Refseq => "refseq",
+            _ => unreachable!(),
+        }
+    }
+
+    fn url(&self) -> &'static str {
+        match self {
+            AssemblySource::Genbank => {
+                "https://ftp.ncbi.nlm.nih.gov/genomes/ASSEMBLY_REPORTS/assembly_summary_genbank.txt"
+            }
+            AssemblySource::Refseq => {
+                "https://ftp.ncbi.nlm.nih.gov/genomes/ASSEMBLY_REPORTS/assembly_summary_refseq.txt"
+            }
+            _ => unreachable!(),
         }
     }
 }
@@ -211,12 +242,14 @@ fn download_and_extract_taxdump(path: &str) {
     pb.finish();
 }
 
-fn download_assembly_summary(path: &str) {
-    // TODO: re-use existing Client
+fn download_assembly_summary(assembly_source: &AssemblySource, out_path: &str) {
     let client = Client::new();
-    let mut response = client.get(ASSEMBLY_SUMMARY_URL).send().expect(&format!(
+
+    let assembly_summary_url = assembly_source.url();
+
+    let mut response = client.get(assembly_summary_url).send().expect(&format!(
         "Unable to fetch assembly summary from {}",
-        ASSEMBLY_SUMMARY_URL
+        assembly_summary_url
     ));
 
     let content_length = response.content_length().unwrap_or(0);
@@ -228,9 +261,10 @@ fn download_assembly_summary(path: &str) {
             .progress_chars(PROGRESS_CHARS),
     );
 
-    pb.set_message("assembly_summaries.txt");
+    pb.set_message(format!("{}", out_path));
 
-    let file = File::create(path).expect(&format!("Unable to open assembly summary {}", path));
+    let file =
+        File::create(out_path).expect(&format!("Unable to open assembly summary {}", out_path));
     let mut wrapped_file = pb.wrap_write(file);
 
     let _ = response.copy_to(&mut wrapped_file);
@@ -245,7 +279,7 @@ fn load_taxonomy(taxdump_path: &str) -> GeneralTaxonomy {
 }
 
 fn filter_assemblies(
-    assembly_summary_path: String,
+    assembly_summary_path: &String,
     // TODO: combine multiple with AND/OR?
     filter_assembly_levels: Option<Vec<String>>,
     filter_tax_ids: HashSet<&str>,
@@ -312,14 +346,25 @@ fn filter_assemblies(
 fn main() {
     let args = Args::parse();
 
-    // download taxonomy and assembly summary
-    // TODO: do these things in parallel?
+    // either use the provided assembly summary file or fetch it from source. if fetching from
+    // source and it already exists; just use the existing file unless --no-cache is enabled.
+    let assembly_summary_path = match (args.assembly_summary_path, &args.source) {
+        (None, assembly_source) => {
+            let path = format!("assembly_summary_{}.txt", assembly_source.as_str());
+            if args.no_cache || (!Path::new(&path).exists()) {
+                download_assembly_summary(&assembly_source, &path);
+            };
+            path
+        }
+        (Some(assembly_summary_path), AssemblySource::None) => assembly_summary_path,
+        _ => {
+            panic!("--source and --assembly-summary-path are mutually exclusive")
+        }
+    };
+
+    // download taxonomy
     if args.no_cache || !Path::new(&args.taxdump_path).exists() {
         download_and_extract_taxdump(&args.taxdump_path);
-    }
-
-    if args.no_cache || !Path::new(&args.assembly_summary_path).exists() {
-        download_assembly_summary(&args.assembly_summary_path);
     }
 
     let pb = ProgressBar::new(0);
@@ -356,7 +401,7 @@ fn main() {
     };
 
     let assemblies = filter_assemblies(
-        args.assembly_summary_path,
+        &assembly_summary_path,
         args.assembly_level,
         descendant_tax_ids,
     );

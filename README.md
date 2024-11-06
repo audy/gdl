@@ -66,7 +66,6 @@ gdl --tax-id 562 --format gff
 # TODO
 
 3. `--cache-dir` - where to store the NCBI tax dump and `assembly_summary.txt`
-4. `--repository` - either GenBank or RefSeq (default is GenBank)
 5. `--no-clobber` - do not overwrite existing files
 6. `--verify` - download and check MD5SUM files
 
