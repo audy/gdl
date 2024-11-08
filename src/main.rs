@@ -261,7 +261,7 @@ fn download_assembly_summary(assembly_source: &AssemblySource, out_path: &str) {
             .progress_chars(PROGRESS_CHARS),
     );
 
-    pb.set_message(format!("{}", out_path));
+    pb.set_message(out_path.to_string());
 
     let file =
         File::create(out_path).expect(&format!("Unable to open assembly summary {}", out_path));
@@ -336,8 +336,6 @@ fn filter_assemblies(
         }
     }
 
-    let n_assemblies = assemblies.len();
-
     pb.finish();
 
     assemblies
@@ -352,7 +350,7 @@ fn main() {
         (None, assembly_source) => {
             let path = format!("assembly_summary_{}.txt", assembly_source.as_str());
             if args.no_cache || (!Path::new(&path).exists()) {
-                download_assembly_summary(&assembly_source, &path);
+                download_assembly_summary(assembly_source, &path);
             };
             path
         }
@@ -440,7 +438,7 @@ fn main() {
             .map(|assembly| {
                 let client = client.clone();
                 pb.inc(1);
-                let _ = download_assembly(&client, &assembly, &args.format, &out_path);
+                let _ = download_assembly(&client, assembly, &args.format, out_path);
             })
             .collect();
 
