@@ -152,10 +152,8 @@ fn download_assembly(
     out_path: &Path,
 ) -> PathBuf {
     // TODO: use a proper url parser
-    let last_part = assembly.ftp_path.split('/').last().expect(&format!(
-        "Failed to get the filename from FTP path {}",
-        assembly.ftp_path
-    ));
+    let last_part = assembly.ftp_path.split('/').last().unwrap_or_else(|| panic!("Failed to get the filename from FTP path {}",
+        assembly.ftp_path));
 
     let url = format!(
         "{}/{}_genomic.{}.gz",
@@ -168,16 +166,16 @@ fn download_assembly(
     let assembly_path = out_path.join(assembly_filename);
 
     let mut file = File::create(&assembly_path)
-        .expect(&format!("Unable to write to {}", assembly_path.display()));
+        .unwrap_or_else(|_| panic!("Unable to write to {}", assembly_path.display()));
 
     let mut response = client
         .get(&url)
         .send()
-        .expect(&format!("Error fetching data from {}", url));
+        .unwrap_or_else(|_| panic!("Error fetching data from {}", url));
 
     response
         .copy_to(&mut file)
-        .expect(&format!("Unable to write to {}", assembly_path.display()));
+        .unwrap_or_else(|_| panic!("Unable to write to {}", assembly_path.display()));
 
     assembly_path
 }
@@ -196,7 +194,7 @@ fn get_tax_id<'a>(
                 0 => Err("No matches found"),
                 1 => Ok(matches
                     .first()
-                    .expect(&format!("No tax ID found for name {}", tax_name))),
+                    .unwrap_or_else(|| panic!("No tax ID found for name {}", tax_name))),
                 // TODO: show matched lineages and their tax IDs to help the user disambiguate
                 _ => Err("Name is ambiguous"),
             }
@@ -207,10 +205,8 @@ fn get_tax_id<'a>(
 
 fn download_and_extract_taxdump(path: &str) {
     let client = Client::new();
-    let mut response = client.get(TAXDUMP_URL).send().expect(&format!(
-        "Unable to fetch NCBI taxonomy dump from {}",
-        TAXDUMP_URL
-    ));
+    let mut response = client.get(TAXDUMP_URL).send().unwrap_or_else(|_| panic!("Unable to fetch NCBI taxonomy dump from {}",
+        TAXDUMP_URL));
 
     let content_length = response.content_length().unwrap_or(0);
 
@@ -232,7 +228,7 @@ fn download_and_extract_taxdump(path: &str) {
     let decompressed = GzDecoder::new(tar_gz);
     let mut archive = Archive::new(decompressed);
 
-    std::fs::create_dir_all(path).expect(&format!("Unable to create taxdump output dir: {}", path));
+    std::fs::create_dir_all(path).unwrap_or_else(|_| panic!("Unable to create taxdump output dir: {}", path));
     archive
         .unpack(path)
         .expect("Unable to extract taxdump.tar.gz");
@@ -247,10 +243,8 @@ fn download_assembly_summary(assembly_source: &AssemblySource, out_path: &str) {
 
     let assembly_summary_url = assembly_source.url();
 
-    let mut response = client.get(assembly_summary_url).send().expect(&format!(
-        "Unable to fetch assembly summary from {}",
-        assembly_summary_url
-    ));
+    let mut response = client.get(assembly_summary_url).send().unwrap_or_else(|_| panic!("Unable to fetch assembly summary from {}",
+        assembly_summary_url));
 
     let content_length = response.content_length().unwrap_or(0);
 
@@ -264,7 +258,7 @@ fn download_assembly_summary(assembly_source: &AssemblySource, out_path: &str) {
     pb.set_message(out_path.to_string());
 
     let file =
-        File::create(out_path).expect(&format!("Unable to open assembly summary {}", out_path));
+        File::create(out_path).unwrap_or_else(|_| panic!("Unable to open assembly summary {}", out_path));
     let mut wrapped_file = pb.wrap_write(file);
 
     let _ = response.copy_to(&mut wrapped_file);
@@ -273,9 +267,9 @@ fn download_assembly_summary(assembly_source: &AssemblySource, out_path: &str) {
 }
 
 fn load_taxonomy(taxdump_path: &str) -> GeneralTaxonomy {
-    let tax = load(taxdump_path).expect(&format!("Unable to load taxdump from {}", taxdump_path));
+    
 
-    tax
+    load(taxdump_path).unwrap_or_else(|_| panic!("Unable to load taxdump from {}", taxdump_path))
 }
 
 fn filter_assemblies(
@@ -285,10 +279,8 @@ fn filter_assemblies(
     filter_tax_ids: HashSet<&str>,
 ) -> Vec<NCBIAssembly> {
     // filter assembly summaries
-    let assembly_summary_file = File::open(&assembly_summary_path).expect(&format!(
-        "Unable to open assembly summary path {}",
-        assembly_summary_path
-    ));
+    let assembly_summary_file = File::open(assembly_summary_path).unwrap_or_else(|_| panic!("Unable to open assembly summary path {}",
+        assembly_summary_path));
 
     // skip first line because it doesn't contain an actual header
     let mut buf_reader = BufReader::new(assembly_summary_file);
@@ -389,10 +381,8 @@ fn main() {
         [tax_id].into()
     } else {
         tax.descendants(tax_id)
-            .expect(&format!(
-                "Unable to find taxonomic descendants for tax ID {}",
-                tax_id
-            ))
+            .unwrap_or_else(|_| panic!("Unable to find taxonomic descendants for tax ID {}",
+                tax_id))
             .into_iter()
             .chain([tax_id])
             .collect()
