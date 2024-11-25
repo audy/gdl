@@ -45,5 +45,5 @@ jobs:
       - name: Upload release artifact
         uses: actions/upload-artifact@v3
         with:
-          name: gdl-${{ matrix.os }}-${{architecture}}
+          name: gdl-${{ matrix.os }}
           path: target/release/gdl
