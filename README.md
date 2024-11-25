@@ -21,7 +21,7 @@ NCBI GenBank (RefSeq).
 gdl --tax-name "Lactobacillales" --format gbk --source refseq --assembly-level "Complete Genome"
 
 # Download all Betacoronavirus genomes currently in GenBank
-gdl --tax-name "Betacoronavirus" --format fna --source genbank
+gdl --tax-name "Betacoronavirus" --format fna --source genbank --out-dir betacoronaviruses/
 
 # Download all Complete viral assemblies
 gdl --tax-name "Viruses" --format fna --source refseq --assembly-level "Complete Genome"
@@ -64,7 +64,7 @@ Options:
       --out-dir <OUT_DIR>
           output directory, default=pwd
       --source <SOURCE>
-          where to fetch assemblies from (default is RefSeq) [default: none] [possible values: genbank, refseq, none]
+          where to fetch assemblies from (default is RefSeq) [default: refseq] [possible values: genbank, refseq, none]
       --assembly-summary-path <ASSEMBLY_SUMMARY_PATH>
           path to assembly_summary.txt
       --tax-id <TAX_ID>
@@ -74,8 +74,7 @@ Options:
       --tax-name <TAX_NAME>
           tax_name to download assemblies for (includes descendants unless --no-children is enabled)
       --assembly-level <ASSEMBLY_LEVEL>
-          include assemblies that match this assembly level. can be used multiple times by default, all assembly_levels are included
+          include assemblies that match this assembly level. By default, all assembly_levels are included
   -h, --help
           Print help
 ```
-
