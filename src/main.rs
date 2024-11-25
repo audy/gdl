@@ -81,8 +81,8 @@ struct Args {
     #[clap(long)]
     tax_name: Option<String>,
 
-    /// include assemblies that match this assembly level. can be used multiple times
-    /// by default, all assembly_levels are included
+    /// include assemblies that match this assembly level. By default, all assembly_levels are
+    /// included
     #[clap(long)]
     assembly_level: Option<Vec<String>>,
 }
