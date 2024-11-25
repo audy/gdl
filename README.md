@@ -2,16 +2,33 @@
 
 [![Rust](https://github.com/audy/gdl/actions/workflows/rust.yml/badge.svg)](https://github.com/audy/gdl/actions/workflows/rust.yml)
 
-A fast, command-line tool for downloading genome assemblies from NCBI. `gdl`
-aims to be fast and easy to use.
+A fast, easy-to-use, command-line tool for downloading genome assemblies from
+NCBI GenBank (RefSeq).
 
 ## Features
 
-- Taxonomy-aware: Fetch all genomes for any node on the NCBI taxonomy tree
-  (E.g., fetch all assemblies under the family Enterobacteriaceae)
-- Fast: Runs in parallel and is X to Y times faster than other tools
+- **Taxonomic Filtering** - Download all assemblies belonging to a specific
+  kingdom, phylum, ..., species. Filter based on name OR NCBI Tax ID
+- **Fast** - Use all available processors + connections are re-used to reduce overhead
+- **Multiple Sources** - Fetch assemblies from RefSeq or GenBank
+- **Filtering** - Filter based on `assembly_level` (Complete, Contig, Chromosome, ...)
+
+## Examples
+
+```sh
+# Download all complete genomes in Lactobacillales (order) in GenBank format
+gdl --tax-name "Lactobacillales" --format gbk --source refseq --assembly-level "Complete Genome"
+
+# Download all Betacoronavirus genomes currently in GenBank
+gdl --tax-name "Betacoronavirus" --format fna --source genbank
+
+# Download all Complete viral assemblies
+gdl --tax-name "Viruses" --format fna --source refseq --assembly-level "Complete Genome"
+```
 
 ## Installation
+
+[Download a pre-compiled binary]()
 
 ### From Source
 
@@ -21,7 +38,13 @@ cargo build --release
 (sudo) cp target/release/gdl /usr/local/bin/
 ```
 
-## Usage
+### From Cargo
+
+```sh
+cargo install gdl
+```
+
+## Full Usage
 
 ```
 Usage: gdl [OPTIONS] <--tax-id <TAX_ID>|--tax-name <TAX_NAME>>
@@ -55,21 +78,3 @@ Options:
           Print help
 ```
 
-
-### Examples
-
-```sh
-# download all E. coli genomes (including descendants of E. coli) in FASTA format
-gdl --tax-id 562 --format fasta
-
-# download all E. coli genomes in GFF format
-gdl --tax-id 562 --format gff
-```
-
-# TODO
-
-3. `--cache-dir` - where to store the NCBI tax dump and `assembly_summary.txt`
-5. `--no-clobber` - do not overwrite existing files
-6. `--verify` - download and check MD5SUM files
-
-- Atomic downloads (don't save partially downloaded files if interrupted)
