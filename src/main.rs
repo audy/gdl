@@ -61,7 +61,7 @@ struct Args {
     FILTERING PARAMETERS
     */
     /// where to fetch assemblies from (default is RefSeq)
-    #[clap(value_enum, long, default_value_t = AssemblySource::None)]
+    #[clap(value_enum, long, default_value_t = AssemblySource::Refseq)]
     source: AssemblySource,
 
     /// path to assembly_summary.txt
