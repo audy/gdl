@@ -166,11 +166,19 @@ fn download_assembly(
         format.as_str()
     );
 
+    let tmp_assembly_filename = format!("{}.{}.gz.tmp", last_part, format.as_str());
+    let tmp_assembly_path = out_path.join(tmp_assembly_filename);
+
     let assembly_filename = format!("{}.{}.gz", last_part, format.as_str());
     let assembly_path = out_path.join(assembly_filename);
 
-    let mut file = File::create(&assembly_path)
-        .unwrap_or_else(|_| panic!("Unable to write to {}", assembly_path.display()));
+
+    if assembly_path.exists() {
+        return assembly_path;
+    }
+
+    let mut file = File::create(&tmp_assembly_path)
+        .unwrap_or_else(|_| panic!("Unable to write to {}", tmp_assembly_path.display()));
 
     let mut response = client
         .get(&url)
@@ -179,7 +187,13 @@ fn download_assembly(
 
     response
         .copy_to(&mut file)
-        .unwrap_or_else(|_| panic!("Unable to write to {}", assembly_path.display()));
+        .unwrap_or_else(|_| panic!("Unable to write to {}", tmp_assembly_path.display()));
+
+
+    // move .tmp to final path
+    let _ = fs::rename(tmp_assembly_path.clone(), assembly_path.clone()).unwrap_or_else( |_|
+        panic!("Unable to rename {} to {}", tmp_assembly_path.display(), assembly_path.display())
+    );
 
     assembly_path
 }
@@ -329,15 +343,8 @@ fn filter_assemblies(
     for result in reader.deserialize() {
         let assembly: NCBIAssembly = result.expect("Unable to parse assembly summary line");
 
-        if filter_tax_ids.contains(&assembly.taxid.as_str())
-            && (filter_assembly_levels.is_none()
-                || (filter_assembly_levels
-                    .as_ref()
-                    .expect("Unable to parse assembly level")
-                    .contains(&assembly.assembly_level)))
-        {
-            assemblies.push(assembly);
-        }
+        // keep everything (in case there are assemblies not under root for some reason?)
+        assemblies.push(assembly);
     }
 
     pb.finish_with_message(format!("Kept {} assemblies", assemblies.len()));
@@ -445,7 +452,7 @@ fn main() {
             .map(|assembly| {
                 let client = client.clone();
                 pb.inc(1);
-                let _ = download_assembly(&client, assembly, &args.format, out_path);
+                download_assembly(&client, assembly, &args.format, out_path);
             })
             .collect();
 
