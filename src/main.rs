@@ -100,7 +100,7 @@ struct NCBIAssembly {
 enum AssemblyFormat {
     Fna,
     Faa,
-    Gbk,
+    Gbff,
     Gff,
 }
 
@@ -109,7 +109,7 @@ impl AssemblyFormat {
         match self {
             AssemblyFormat::Fna => "fna",
             AssemblyFormat::Faa => "faa",
-            AssemblyFormat::Gbk => "gbk",
+            AssemblyFormat::Gbff => "gbff",
             AssemblyFormat::Gff => "gff",
         }
     }
