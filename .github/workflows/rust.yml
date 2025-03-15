@@ -37,8 +37,3 @@ jobs:
         run: cargo test --verbose
       - name: Build (Release)
         run: cargo build --release
-      - name: Upload release artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: gdl-${{ matrix.os }}-${{ matrix.architecture }}
-          path: target/release/gdl
