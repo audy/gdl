@@ -7,12 +7,12 @@ NCBI GenBank (RefSeq).
 
 ## Features
 
-- **Taxonomic Filtering** - Download all assemblies belonging to a specific
-  kingdom, phylum, class, order, family, genus, species, .... Filter based on
-  name OR NCBI Tax ID. No need to separately look up tax IDs.
-- **Fast** - Use all available processors + connections are re-used to reduce overhead
-- **Multiple Sources** - Fetch assemblies from RefSeq or GenBank
-- **Filtering** - Filter based on `assembly_level` (Complete, Contig, Chromosome, ...)
+- **Simple Taxonomic Filtering** - Filter by name or tax ID at any rank,
+  without having to separately look up tax IDs
+- **Assembly Metadata Filtering** - Filter based on `assembly_level` (Complete,
+  Contig, Chromosome, ...)
+- **Fast** - Use multiple processors
+- **Portable** - A single binary
 
 ## Examples
 
