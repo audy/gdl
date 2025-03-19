@@ -17,13 +17,20 @@ NCBI GenBank (RefSeq).
 ## Examples
 
 ```sh
-# Download all complete genomes in Lactobacillales (order) in GenBank format
-gdl --tax-name "Lactobacillales" --format gbk --source refseq --assembly-level "Complete Genome"
+# Download all assemblies within the clade "Dinosauria"
+gdl --tax-name Dinosauria
 
-# Download all Betacoronavirus genomes currently in GenBank
+# Download all GenBank genomes within the order Lactobacillales
+gdl --tax-name "Lactobacillales" --source genbank
+
+# Download all complete RefSeq assemblies in .gbk format within the genus
+# Phocaeicola (tax_id=821)
+gdl --tax-id 821 --format gbk --source refseq --assembly-level "Complete Genome"
+
+# Download all Betacoronavirus genomes in GenBank
 gdl --tax-name "Betacoronavirus" --format fna --source genbank --out-dir betacoronaviruses/
 
-# Download all Complete viral assemblies
+# Download all Complete viral assemblies from RefSeq
 gdl --tax-name "Viruses" --format fna --source refseq --assembly-level "Complete Genome"
 ```
 
@@ -39,42 +46,46 @@ cargo build --release
 (sudo) cp target/release/gdl /usr/local/bin/
 ```
 
-### From Cargo
+## Options
 
-```sh
-cargo install gdl
-```
+### `--help`
 
-## Full Usage
+Print help and exit.
 
-```
-Usage: gdl [OPTIONS] <--tax-id <TAX_ID>|--tax-name <TAX_NAME>>
+### `--tax-id <TAX_ID>` / `--tax-name <TAX_NAME>`
 
-Options:
-      --taxdump-path <TAXDUMP_PATH>
-          path to extracted taxdump.tar.gz [default: taxdump]
-      --dry-run
-          do not actually download anything
-      --no-cache
-          re-fetch assembly_summary.txt and taxdump
-      --parallel <PARALLEL>
-          [default: 1]
-      --format <FORMAT>
-          [default: fna] [possible values: fna, faa, gbk, gff]
-      --out-dir <OUT_DIR>
-          output directory, default=pwd
-      --source <SOURCE>
-          where to fetch assemblies from (default is RefSeq) [default: refseq] [possible values: genbank, refseq, none]
-      --assembly-summary-path <ASSEMBLY_SUMMARY_PATH>
-          path to assembly_summary.txt
-      --tax-id <TAX_ID>
-          tax_id to download assemblies for (includes descendants unless --no-children is enabled)
-      --no-children
-          do not include child tax IDs of --tax-id (only download assemblies that have the same tax ID as provided by --tax-id)
-      --tax-name <TAX_NAME>
-          tax_name to download assemblies for (includes descendants unless --no-children is enabled)
-      --assembly-level <ASSEMBLY_LEVEL>
-          include assemblies that match this assembly level. By default, all assembly_levels are included
-  -h, --help
-          Print help
-```
+Download all assemblies within the provided taxonomic node.
+
+### `--no-children`
+
+Do not download assemblies assigned to tax IDs below the provided taxonoic node.
+
+### `--parallel <PARALLEL>`
+
+Download concurrently in `<PARALLEL>` threads.
+
+### `--format <FORMAT>`
+
+File format to retrieve. The default is `fna`. The possible values are:
+
+- `fna` - fasta nucleotide, genomic
+- `faa` - fasta amino acid, coding
+- `gbk` - assembly and annotations, genbank format
+- `gff` - assembly and annotations, genomic file format
+
+### `--out-dir <OUT_DIR>`
+
+Output directory to store files in. By default, will use `$pwd`. If provided,
+the directly must exist prior to running.
+
+### `--source <SOURCE>`
+
+The source from which to retrieve the genomes. Can be either "refseq" or
+"genbank" (default=refseq).
+
+### `--assembly-level <ASSEMBLY_LEVEL>`
+
+Filter to only assemblies that match `<ASSEMBLY_LEVEL>`. Default is to include
+assemblies with any assembly level value. Possible values are `Contig`,
+`Scaffold`, `Complete Genome` and `Chromosome`. For defintions, see [NCBI
+documentation](https://www.ncbi.nlm.nih.gov/datasets/docs/v2/glossary/).
