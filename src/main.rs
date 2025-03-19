@@ -436,8 +436,11 @@ fn main() {
                 .progress_chars(PROGRESS_CHARS),
         );
         pb.set_message(format!(
-            "Downloading {} assemblies in {} format",
+            "Downloading {} assemblies within the {} `{}` (tax_id={}) in {} format\n",
             assemblies.len(),
+            tax.rank(tax_id).unwrap(),
+            tax.name(tax_id).unwrap(),
+            tax_id,
             &args.format.as_str()
         ));
         let _tasks: Vec<_> = assemblies
