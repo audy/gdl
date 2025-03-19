@@ -10,8 +10,8 @@ NCBI GenBank (RefSeq).
 - **Simple Taxonomic Filtering** - Retrieve assemblies at or below a given
   taxonomic name or ID (E.g., "download all assemblies within the order
   _Lactobacillales_")
-- **Assembly Metadata Filtering** - Filter based on `assembly_level` (Complete,
-  Contig, Chromosome, ...)
+- **Assembly Metadata Filtering** - Specify genome completeness, source
+  (GenBank, RefSeq), format (`.gbk`, `.fna`, ...)
 - **Fast** - Use multiple processors
 - **Portable** - A single binary
 
