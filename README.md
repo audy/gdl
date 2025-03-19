@@ -29,7 +29,7 @@ gdl --tax-name "Viruses" --format fna --source refseq --assembly-level "Complete
 
 ## Installation
 
-[Download a pre-compiled binary]()
+[Download a pre-compiled binary](https://github.com/audy/gdl/releases)
 
 ### From Source
 
