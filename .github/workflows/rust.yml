@@ -41,9 +41,3 @@ jobs:
         run: |
           cargo build --release
           ls -lash target/release
-
-      - name: Upload release artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: gdl-${{ matrix.os }}-${{matrix.architecture}}
-          path: target/release/gdl
