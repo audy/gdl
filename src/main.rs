@@ -461,3 +461,41 @@ fn main() {
 
     println!("Thank you for flying gdl!");
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+    use httpmock::MockServer;
+    use httpmock::Method::GET;
+
+    #[test]
+    fn test_download_assembly() {
+        // Start a mock HTTP server
+        let server = MockServer::start();
+        let file_content = b"test genome data";
+        let ftp_path = format!("{}/test_asm", server.url(""));
+        let mock = server.mock(|when, then| {
+            when.method(GET)
+                .path("/test_asm/test_asm_genomic.fna.gz");
+            then.status(200)
+                .header("Content-Type", "application/octet-stream")
+                .body(file_content);
+        });
+
+        let assembly = NCBIAssembly {
+            taxid: "123".to_string(),
+            ftp_path: ftp_path.clone(),
+            assembly_level: "Complete Genome".to_string(),
+        };
+        let format = AssemblyFormat::Fna;
+        let client = Client::new();
+        let tmp_dir = tempdir().unwrap();
+        let out_path = tmp_dir.path();
+
+        let result_path = download_assembly(&client, &assembly, &format, out_path);
+        let result_data = std::fs::read(&result_path).unwrap();
+        assert_eq!(result_data, file_content);
+        mock.assert();
+    }
+}
