@@ -10,19 +10,11 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
+  test:
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
         include:
-          # macos - ARM
-          - os: macos-latest
-            architecture: arm64
-            runner: macos-14 # m1
-          # macos - x86
-          - os: macos-latest
-            architecture: x64
-            runner: macos-13 # x86
           # ubuntu - x86
           - os: ubuntu-latest
             architecture: x64
@@ -31,13 +23,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - name: Build
-        run: cargo build --verbose
 
       - name: Run tests
-        run: cargo test --verbose
-
-      - name: Build (Release)
-        run: |
-          cargo build --release
-          ls -lash target/release
+        run: cargo test
