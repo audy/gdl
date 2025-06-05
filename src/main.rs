@@ -1,12 +1,11 @@
 use clap::{ArgGroup, Parser, ValueEnum};
 use csv::ReaderBuilder;
 use flate2::read::GzDecoder;
-use indicatif::{ProgressBar, ProgressState, ProgressStyle};
+use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use rayon::ThreadPoolBuilder;
 use reqwest::blocking::Client;
 use std::collections::HashSet;
-use std::fmt::Write;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -21,7 +20,7 @@ const TAXDUMP_URL: &str = "https://ftp.ncbi.nih.gov/pub/taxonomy/taxdump.tar.gz"
 const PB_DOWNLOAD_TEMPLATE: &str =
     "[{elapsed:.cyan}] {msg} [{bar:.green}] {bytes:.blue}/{total_bytes:.blue}";
 const PB_PROGRESS_TEMPLATE: &str =
-    "[{elapsed:.cyan}] {msg} [{bar:.green}] {percent:.blue}% ({eta})";
+    "[{elapsed:.cyan}] {msg} [{bar:.green}] {percent:.blue}% (ETA: {eta})";
 const PB_SPINNER_TEMPLATE: &str = "[{elapsed:.cyan}] {msg}";
 const PROGRESS_CHARS: &str = "█░ ";
 
@@ -430,9 +429,6 @@ fn main() {
         pb.set_style(
             ProgressStyle::with_template(PB_PROGRESS_TEMPLATE)
                 .unwrap()
-                .with_key("eta", |state: &ProgressState, w: &mut dyn Write| {
-                    write!(w, "{:.1}s", state.eta().as_secs_f64()).unwrap()
-                })
                 .progress_chars(PROGRESS_CHARS),
         );
         pb.set_message(format!(
@@ -465,9 +461,9 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
-    use httpmock::MockServer;
     use httpmock::Method::GET;
+    use httpmock::MockServer;
+    use tempfile::tempdir;
 
     #[test]
     fn test_download_assembly() {
@@ -476,8 +472,7 @@ mod tests {
         let file_content = b"test genome data";
         let ftp_path = format!("{}/test_asm", server.url(""));
         let mock = server.mock(|when, then| {
-            when.method(GET)
-                .path("/test_asm/test_asm_genomic.fna.gz");
+            when.method(GET).path("/test_asm/test_asm_genomic.fna.gz");
             then.status(200)
                 .header("Content-Type", "application/octet-stream")
                 .body(file_content);
