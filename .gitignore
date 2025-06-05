@@ -1,5 +1,6 @@
 /target
 *.fna.gz
+*.gbff.gz
 assembly_summary_*.txt
 taxdump.tar.gz
 taxdump/
