@@ -5,9 +5,11 @@
 A fast, easy-to-use, command-line tool for downloading genome assemblies from
 NCBI GenBank (RefSeq).
 
+![Demo](demo.gif)
+
 ## Features
 
-- **Simple Taxonomic Filtering** - Retrieve assemblies at or below a given
+- **Easy Taxonomic Filtering** - Retrieve assemblies at or below a given
   taxonomic name or ID (E.g., "download all assemblies within the order
   _Lactobacillales_")
 - **Assembly Metadata Filtering** - Specify genome completeness, source
