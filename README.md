@@ -39,10 +39,19 @@ gdl --tax-name "Viruses" --format fna --source refseq --assembly-level "Complete
 
 ## Installation
 
+### Homebrew
+
+```bash
+brew tap audy/gdl
+brew install audy/gdl/gdl
+```
+
 ### From binary
 
 Binaries are built for macOS, Windows and Linux and are available
 [here](https://github.com/audy/gdl/releases)
+
+
 
 ### From Source
 
