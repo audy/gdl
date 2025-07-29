@@ -7,11 +7,11 @@ authors = [ "Austin Davis-Richardson <hello@agdr.org>" ]
 [dependencies]
 clap = { version = "4.5.19", features = ["derive"] }
 csv = "1.3.0"
-flate2 = "1.0.34"
+flate2 = { version = "1.0.34", default-features = false, features = ["rust_backend"] }
 futures = "0.3.30"
 indicatif = "0.17.8"
 rayon = "1.10.0"
-reqwest = { version = "0.12.8", features = ["blocking"] }
+reqwest = { version = "0.12.8", features = ["blocking", "native-tls-vendored"] }
 serde = "1.0.210"
 tar = "0.4.42"
 taxonomy = { git = "https://github.com/onecodex/taxonomy.git", tag = "v0.10.1" }
