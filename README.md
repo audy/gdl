@@ -42,8 +42,7 @@ gdl --tax-name "Viruses" --format fna --source refseq --assembly-level "Complete
 ### Homebrew
 
 ```bash
-brew tap audy/gdl
-brew install audy/gdl/gdl
+brew install audy/tap/gdl
 ```
 
 ### From binary
