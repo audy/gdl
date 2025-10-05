@@ -3,6 +3,9 @@ name = "gdl"
 version = "0.0.3"
 edition = "2021"
 authors = [ "Austin Davis-Richardson <hello@agdr.org>" ]
+license = "MIT"
+repository = "https://github.com/audy/gdl"
+description = "CLI to quickly fetch genome assemblies from NCBI"
 
 [dependencies]
 clap = { version = "4.5.19", features = ["derive"] }
