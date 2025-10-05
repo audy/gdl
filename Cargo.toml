@@ -14,7 +14,7 @@ rayon = "1.10.0"
 reqwest = { version = "0.12.8", features = ["blocking", "native-tls-vendored"] }
 serde = "1.0.210"
 tar = "0.4.42"
-taxonomy = { git = "https://github.com/onecodex/taxonomy.git", tag = "v0.10.1" }
+taxonomy = "0.10.1"
 
 [dev-dependencies]
 tempfile = "3.10.1"

@@ -1986,7 +1986,8 @@ dependencies = [
 [[package]]
 name = "taxonomy"
 version = "0.10.1"
-source = "git+https://github.com/onecodex/taxonomy.git?tag=v0.10.1#9901a4863fe48056712680faea0e21a17ceec525"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5031e5fb0f52ec1f31929aaaf58727c72865abc045743f07d0a2027fa5d213ea"
 dependencies = [
  "memchr",
  "quick-xml",
