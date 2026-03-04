@@ -1,7 +1,12 @@
+use arrow::array::StringArray;
+use arrow::datatypes::{DataType, Field, Schema};
+use arrow::record_batch::RecordBatch;
 use clap::{ArgGroup, Parser, ValueEnum};
 use csv::ReaderBuilder;
 use flate2::read::GzDecoder;
 use indicatif::{ProgressBar, ProgressStyle};
+use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+use parquet::arrow::ArrowWriter;
 use rayon::prelude::*;
 use rayon::ThreadPoolBuilder;
 use reqwest::blocking::Client;
@@ -9,10 +14,12 @@ use std::collections::HashSet;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use tar::Archive;
-use taxonomy::ncbi::load;
+use taxonomy::ncbi;
+use taxonomy::parquet as tax_parquet;
 use taxonomy::{GeneralTaxonomy, Taxonomy};
 
 const TAXDUMP_URL: &str = "https://ftp.ncbi.nih.gov/pub/taxonomy/taxdump.tar.gz";
@@ -241,6 +248,14 @@ fn download_and_extract_taxdump(path: &str) {
 
     fs::remove_file("taxdump.tar.gz").expect("Unable to remove taxdump.tar.gz");
 
+    pb.set_message("Converting taxonomy to parquet");
+    let tax = ncbi::load(path).unwrap_or_else(|_| panic!("Unable to load taxdump from {}", path));
+    let parquet_path = format!("{}.parquet", path);
+    tax_parquet::save::<&str, _, _>(&tax, &parquet_path)
+        .unwrap_or_else(|_| panic!("Unable to save taxonomy to {}", parquet_path));
+    fs::remove_dir_all(path)
+        .unwrap_or_else(|_| panic!("Unable to remove taxdump directory {}", path));
+
     pb.finish();
 }
 
@@ -276,11 +291,175 @@ fn download_assembly_summary(assembly_source: &AssemblySource, out_path: &str) {
     pb.finish();
 }
 
+fn assembly_summary_schema() -> Arc<Schema> {
+    Arc::new(Schema::new(vec![
+        Field::new("taxid", DataType::Utf8, false),
+        Field::new("ftp_path", DataType::Utf8, false),
+        Field::new("assembly_level", DataType::Utf8, false),
+    ]))
+}
+
+fn save_assembly_summary_to_parquet(txt_path: &str, parquet_path: &str) {
+    let assembly_summary_file = File::open(txt_path)
+        .unwrap_or_else(|_| panic!("Unable to open assembly summary {}", txt_path));
+
+    let mut buf_reader = BufReader::new(assembly_summary_file);
+    let mut first_line = String::new();
+    buf_reader
+        .read_line(&mut first_line)
+        .expect("Unable to skip first line of assembly summary");
+
+    let pb = ProgressBar::new(
+        buf_reader
+            .get_ref()
+            .metadata()
+            .expect("Unable to get file size")
+            .len(),
+    );
+    pb.set_style(
+        ProgressStyle::with_template(PB_PROGRESS_TEMPLATE)
+            .unwrap()
+            .progress_chars(PROGRESS_CHARS),
+    );
+    pb.set_message(format!("Converting {} to parquet", txt_path));
+
+    let wrapped_reader = pb.wrap_read(buf_reader);
+    let mut reader = ReaderBuilder::new()
+        .delimiter(b'\t')
+        .has_headers(true)
+        .from_reader(wrapped_reader);
+
+    let mut taxids: Vec<String> = Vec::new();
+    let mut ftp_paths: Vec<String> = Vec::new();
+    let mut assembly_levels: Vec<String> = Vec::new();
+
+    for result in reader.deserialize() {
+        let assembly: NCBIAssembly = result.expect("Unable to parse assembly summary line");
+        taxids.push(assembly.taxid);
+        ftp_paths.push(assembly.ftp_path);
+        assembly_levels.push(assembly.assembly_level);
+    }
+
+    let schema = assembly_summary_schema();
+    let batch = RecordBatch::try_new(
+        schema.clone(),
+        vec![
+            Arc::new(StringArray::from(taxids)),
+            Arc::new(StringArray::from(ftp_paths)),
+            Arc::new(StringArray::from(assembly_levels)),
+        ],
+    )
+    .expect("Unable to create assembly summary record batch");
+
+    let file = File::create(parquet_path)
+        .unwrap_or_else(|_| panic!("Unable to create parquet file {}", parquet_path));
+    let mut writer =
+        ArrowWriter::try_new(file, schema, None).expect("Unable to create ArrowWriter");
+    writer
+        .write(&batch)
+        .expect("Unable to write assembly summary parquet");
+    writer
+        .close()
+        .expect("Unable to close assembly summary parquet writer");
+
+    pb.finish_with_message(format!("Saved assembly summary to {}", parquet_path));
+}
+
+fn filter_assemblies_from_parquet(
+    parquet_path: &str,
+    filter_assembly_levels: Option<Vec<String>>,
+    filter_tax_ids: HashSet<&str>,
+) -> Vec<NCBIAssembly> {
+    let file = File::open(parquet_path)
+        .unwrap_or_else(|_| panic!("Unable to open {}", parquet_path));
+    let builder = ParquetRecordBatchReaderBuilder::try_new(file)
+        .unwrap_or_else(|_| panic!("Unable to read parquet file {}", parquet_path));
+    let total_rows = builder.metadata().file_metadata().num_rows();
+    let reader = builder
+        .build()
+        .expect("Unable to build parquet record batch reader");
+
+    let pb = ProgressBar::new(total_rows as u64);
+    pb.set_style(
+        ProgressStyle::with_template(PB_PROGRESS_TEMPLATE)
+            .unwrap()
+            .progress_chars(PROGRESS_CHARS),
+    );
+    pb.set_message(format!("Filtering {}", parquet_path));
+
+    let mut assemblies: Vec<NCBIAssembly> = Vec::new();
+
+    for result in reader {
+        let batch = result.expect("Unable to read parquet batch");
+        let taxid_col = batch
+            .column_by_name("taxid")
+            .expect("Missing 'taxid' column")
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("'taxid' must be Utf8");
+        let ftp_path_col = batch
+            .column_by_name("ftp_path")
+            .expect("Missing 'ftp_path' column")
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("'ftp_path' must be Utf8");
+        let assembly_level_col = batch
+            .column_by_name("assembly_level")
+            .expect("Missing 'assembly_level' column")
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("'assembly_level' must be Utf8");
+
+        for i in 0..batch.num_rows() {
+            let taxid = taxid_col.value(i);
+            let assembly_level = assembly_level_col.value(i);
+            if filter_tax_ids.contains(taxid)
+                && (filter_assembly_levels.is_none()
+                    || filter_assembly_levels
+                        .as_ref()
+                        .unwrap()
+                        .contains(&assembly_level.to_string()))
+            {
+                assemblies.push(NCBIAssembly {
+                    taxid: taxid.to_string(),
+                    ftp_path: ftp_path_col.value(i).to_string(),
+                    assembly_level: assembly_level.to_string(),
+                });
+            }
+        }
+
+        pb.inc(batch.num_rows() as u64);
+    }
+
+    pb.finish_with_message(format!("Kept {} assemblies", assemblies.len()));
+
+    assemblies
+}
+
 fn load_taxonomy(taxdump_path: &str) -> GeneralTaxonomy {
-    load(taxdump_path).unwrap_or_else(|_| panic!("Unable to load taxdump from {}", taxdump_path))
+    let parquet_path = format!("{}.parquet", taxdump_path);
+    if Path::new(&parquet_path).exists() {
+        tax_parquet::load(&parquet_path)
+            .unwrap_or_else(|_| panic!("Unable to load taxonomy from {}", parquet_path))
+    } else {
+        ncbi::load(taxdump_path)
+            .unwrap_or_else(|_| panic!("Unable to load taxdump from {}", taxdump_path))
+    }
 }
 
 fn filter_assemblies(
+    assembly_summary_path: &String,
+    filter_assembly_levels: Option<Vec<String>>,
+    filter_tax_ids: HashSet<&str>,
+) -> Vec<NCBIAssembly> {
+    if assembly_summary_path.ends_with(".parquet") {
+        filter_assemblies_from_parquet(assembly_summary_path, filter_assembly_levels, filter_tax_ids)
+    } else {
+        filter_assemblies_from_txt(assembly_summary_path, filter_assembly_levels, filter_tax_ids)
+    }
+}
+
+fn filter_assemblies_from_txt(
     assembly_summary_path: &String,
     // TODO: combine multiple with AND/OR?
     filter_assembly_levels: Option<Vec<String>>,
@@ -348,14 +527,18 @@ fn main() {
     let args = Args::parse();
 
     // either use the provided assembly summary file or fetch it from source. if fetching from
-    // source and it already exists; just use the existing file unless --no-cache is enabled.
+    // source and it already exists; just use the cached parquet unless --no-cache is enabled.
     let assembly_summary_path = match (args.assembly_summary_path, &args.source) {
         (None, assembly_source) => {
-            let path = format!("assembly_summary_{}.txt", assembly_source.as_str());
-            if args.no_cache || (!Path::new(&path).exists()) {
-                download_assembly_summary(assembly_source, &path);
+            let txt_path = format!("assembly_summary_{}.txt", assembly_source.as_str());
+            let parquet_path = format!("assembly_summary_{}.parquet", assembly_source.as_str());
+            if args.no_cache || !Path::new(&parquet_path).exists() {
+                download_assembly_summary(assembly_source, &txt_path);
+                save_assembly_summary_to_parquet(&txt_path, &parquet_path);
+                fs::remove_file(&txt_path)
+                    .unwrap_or_else(|_| panic!("Unable to remove {}", txt_path));
             };
-            path
+            parquet_path
         }
         (Some(assembly_summary_path), AssemblySource::None) => assembly_summary_path,
         _ => {
@@ -364,7 +547,10 @@ fn main() {
     };
 
     // download taxonomy
-    if args.no_cache || !Path::new(&args.taxdump_path).exists() {
+    let taxdump_parquet_path = format!("{}.parquet", &args.taxdump_path);
+    if args.no_cache
+        || (!Path::new(&args.taxdump_path).exists() && !Path::new(&taxdump_parquet_path).exists())
+    {
         download_and_extract_taxdump(&args.taxdump_path);
     }
 
