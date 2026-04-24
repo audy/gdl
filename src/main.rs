@@ -151,16 +151,17 @@ fn download_assembly(
     out_path: &Path,
 ) -> PathBuf {
     // TODO: use a proper url parser
-    let last_part = assembly.ftp_path.split('/').last().unwrap_or_else(|| {
+    let ftp_path = assembly.ftp_path.trim_end_matches('/');
+    let last_part = ftp_path.split('/').last().unwrap_or_else(|| {
         panic!(
             "Failed to get the filename from FTP path {}",
-            assembly.ftp_path
+            ftp_path
         )
     });
 
     let url = format!(
         "{}/{}_genomic.{}.gz",
-        assembly.ftp_path,
+        ftp_path,
         last_part,
         format.as_str()
     );
@@ -174,7 +175,9 @@ fn download_assembly(
     let mut response = client
         .get(&url)
         .send()
-        .unwrap_or_else(|_| panic!("Error fetching data from {}", url));
+        .unwrap_or_else(|_| panic!("Error fetching data from {}", url))
+        .error_for_status()
+        .unwrap_or_else(|e| panic!("HTTP error for {}: {}", url, e));
 
     response
         .copy_to(&mut file)
