@@ -30,6 +30,9 @@ gdl --tax-name "Lactobacillales" --source genbank
 # Phocaeicola (tax_id=821)
 gdl --tax-id 821 --format gbk --source refseq --assembly-level "Complete Genome"
 
+# Download assemblies from multiple taxa (OR logic)
+gdl --tax-id 821 --tax-id 1350 --format fna --source refseq
+
 # Download all Betacoronavirus genomes in GenBank
 gdl --tax-name "Betacoronavirus" --format fna --source genbank --out-dir betacoronaviruses/
 
@@ -68,7 +71,8 @@ Print help and exit.
 
 ### `--tax-id <TAX_ID>` / `--tax-name <TAX_NAME>`
 
-Download all assemblies within the provided taxonomic node.
+Download all assemblies within the provided taxonomic node. `--tax-id` can be
+specified multiple times to include assemblies from multiple taxa (OR logic).
 
 ### `--no-children`
 
