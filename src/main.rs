@@ -7,7 +7,7 @@ use rayon::ThreadPoolBuilder;
 use reqwest::blocking::Client;
 use std::collections::HashSet;
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Duration;
@@ -67,9 +67,10 @@ struct Args {
     #[clap(long)]
     assembly_summary_path: Option<String>,
 
-    /// tax_id to download assemblies for (includes descendants unless --no-children is enabled)
+    /// tax_id to download assemblies for (includes descendants unless --no-children is enabled).
+    /// Can be specified multiple times to include multiple taxa (OR logic).
     #[clap(long)]
-    tax_id: Option<String>, // should this be an int (for validation)
+    tax_id: Vec<String>,
 
     /// do not include child tax IDs of --tax-id (only download assemblies that have the same tax
     /// ID as provided by --tax-id)
@@ -89,13 +90,21 @@ struct Args {
     /// "representative genome"). By default, all categories are included
     #[clap(long)]
     refseq_category: Option<Vec<String>>,
+
+    /// write a TSV table (tax_id, lineage, accession, asm_name, organism, assembly_level,
+    /// refseq_category, path) to this file; use "-" for stdout
+    #[clap(long)]
+    output_table: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize)]
 struct NCBIAssembly {
+    #[serde(rename = "# assembly_accession")]
+    assembly_accession: String,
     taxid: String,
+    organism_name: String,
+    asm_name: String,
     ftp_path: String,
-    // asm_name: String,
     assembly_level: String,
     refseq_category: String,
 }
@@ -192,21 +201,21 @@ fn download_assembly(
     assembly_path
 }
 
-fn get_tax_id<'a>(
-    tax_id: Option<&'a str>,
+fn get_tax_ids<'a>(
+    tax_ids: &'a [String],
     tax_name: Option<&'a str>,
     tax: &'a GeneralTaxonomy,
-) -> Result<&'a str, &'a str> {
-    // TODO: make sure tax ID exists
-    match (tax_id, tax_name) {
-        (Some(tax_id), None) => Ok(tax_id),
-        (None, Some(tax_name)) => {
+) -> Result<Vec<&'a str>, &'static str> {
+    // TODO: make sure tax IDs exist
+    match (tax_ids.is_empty(), tax_name) {
+        (false, None) => Ok(tax_ids.iter().map(|s| s.as_str()).collect()),
+        (true, Some(tax_name)) => {
             let matches = tax.find_all_by_name(tax_name);
             match matches.len() {
                 0 => Err("No matches found"),
-                1 => Ok(matches
+                1 => Ok(vec![matches
                     .first()
-                    .unwrap_or_else(|| panic!("No tax ID found for name {}", tax_name))),
+                    .unwrap_or_else(|| panic!("No tax ID found for name {}", tax_name))]),
                 // TODO: show matched lineages and their tax IDs to help the user disambiguate
                 _ => Err("Name is ambiguous"),
             }
@@ -359,6 +368,59 @@ fn filter_assemblies(
     assemblies
 }
 
+fn write_output_table(
+    table_path: &str,
+    assemblies: &[NCBIAssembly],
+    paths: &[Option<PathBuf>],
+    tax: &GeneralTaxonomy,
+) {
+    let mut writer: Box<dyn Write> = if table_path == "-" {
+        Box::new(BufWriter::new(std::io::stdout()))
+    } else {
+        Box::new(BufWriter::new(
+            File::create(table_path)
+                .unwrap_or_else(|_| panic!("Unable to create output table {}", table_path)),
+        ))
+    };
+
+    writeln!(
+        writer,
+        "tax_id\tlineage\tassembly_accession\tasm_name\torganism_name\tassembly_level\trefseq_category\tpath"
+    )
+    .expect("Unable to write table header");
+
+    for (assembly, path) in assemblies.iter().zip(paths.iter()) {
+        let lineage_str = tax
+            .lineage(assembly.taxid.as_str())
+            .map(|ids| {
+                ids.iter()
+                    .filter_map(|id| tax.name(*id).ok())
+                    .collect::<Vec<_>>()
+                    .join(";")
+            })
+            .unwrap_or_default();
+
+        let path_str = path
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
+
+        writeln!(
+            writer,
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            assembly.taxid,
+            lineage_str,
+            assembly.assembly_accession,
+            assembly.asm_name,
+            assembly.organism_name,
+            assembly.assembly_level,
+            assembly.refseq_category,
+            path_str,
+        )
+        .expect("Unable to write table row");
+    }
+}
+
 fn gdl_cache_dir() -> PathBuf {
     dirs::cache_dir()
         .expect("Unable to determine cache directory")
@@ -418,20 +480,28 @@ fn main() {
 
     let tax = load_taxonomy(taxdump_path_str);
 
-    let tax_id: &str = get_tax_id(args.tax_id.as_deref(), args.tax_name.as_deref(), &tax)
-        .expect("Unable to find a tax ID");
+    let tax_ids: Vec<&str> = get_tax_ids(&args.tax_id, args.tax_name.as_deref(), &tax)
+        .expect("Unable to find tax IDs");
 
     pb.finish_with_message(format!("Loaded {} taxa", tax.names.len()));
 
     let descendant_tax_ids: HashSet<&str> = if args.no_children {
-        [tax_id].into()
+        tax_ids.iter().copied().collect()
     } else {
-        tax.descendants(tax_id)
-            .unwrap_or_else(|_| {
-                panic!("Unable to find taxonomic descendants for tax ID {}", tax_id)
+        tax_ids
+            .iter()
+            .copied()
+            .flat_map(|tax_id| {
+                tax.descendants(tax_id)
+                    .unwrap_or_else(|_| {
+                        panic!(
+                            "Unable to find taxonomic descendants for tax ID {}",
+                            tax_id
+                        )
+                    })
+                    .into_iter()
+                    .chain([tax_id])
             })
-            .into_iter()
-            .chain([tax_id])
             .collect()
     };
 
@@ -457,7 +527,7 @@ fn main() {
         fs::create_dir_all(out_path).expect("Unable to create path");
     }
 
-    if !args.dry_run {
+    let paths: Vec<Option<PathBuf>> = if !args.dry_run {
         // Download assemblies in parallel
         let client = Client::new();
 
@@ -468,19 +538,17 @@ fn main() {
                 .progress_chars(PROGRESS_CHARS),
         );
         pb.set_message(format!(
-            "Downloading {} assemblies within the {} `{}` (tax_id={}) in {} format\n",
+            "Downloading {} assemblies (tax_ids={}) in {} format\n",
             assemblies.len(),
-            tax.rank(tax_id).unwrap(),
-            tax.name(tax_id).unwrap(),
-            tax_id,
+            tax_ids.join(", "),
             &args.format.as_str()
         ));
-        let _tasks: Vec<_> = assemblies
+        let paths: Vec<Option<PathBuf>> = assemblies
             .par_iter()
             .map(|assembly| {
                 let client = client.clone();
                 pb.inc(1);
-                let _ = download_assembly(&client, assembly, &args.format, out_path);
+                Some(download_assembly(&client, assembly, &args.format, out_path))
             })
             .collect();
 
@@ -489,6 +557,14 @@ fn main() {
             assemblies.len(),
             out_dir
         ));
+
+        paths
+    } else {
+        vec![None; n_assemblies]
+    };
+
+    if let Some(table_path) = &args.output_table {
+        write_output_table(table_path, &assemblies, &paths, &tax);
     }
 
     println!("Thank you for flying gdl!");
@@ -515,7 +591,10 @@ mod tests {
         });
 
         let assembly = NCBIAssembly {
+            assembly_accession: "GCF_000001405.40".to_string(),
             taxid: "123".to_string(),
+            organism_name: "Test organism".to_string(),
+            asm_name: "test_asm".to_string(),
             ftp_path: ftp_path.clone(),
             assembly_level: "Complete Genome".to_string(),
             refseq_category: "reference genome".to_string(),

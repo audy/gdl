@@ -1,3 +1,7 @@
+# Upcoming
+
+- `--tax-id` can be provided multiple times
+
 # v0.1.0
 
 - Add `--refseq-category` filter
