@@ -31,9 +31,9 @@ const PROGRESS_CHARS: &str = "█░ ";
         .args(&["tax_id", "tax_name"])
 ))]
 struct Args {
-    /// path to extracted taxdump.tar.gz
-    #[clap(long, default_value = "taxdump")]
-    taxdump_path: String,
+    /// path to extracted taxdump.tar.gz (default: <cache_dir>/gdl/taxdump)
+    #[clap(long)]
+    taxdump_path: Option<String>,
 
     /// do not actually download anything
     #[clap(long, default_value = "false")]
@@ -359,14 +359,34 @@ fn filter_assemblies(
     assemblies
 }
 
+fn gdl_cache_dir() -> PathBuf {
+    dirs::cache_dir()
+        .expect("Unable to determine cache directory")
+        .join("gdl")
+}
+
 fn main() {
     let args = Args::parse();
+
+    let cache_dir = gdl_cache_dir();
+    fs::create_dir_all(&cache_dir)
+        .unwrap_or_else(|_| panic!("Unable to create cache directory {}", cache_dir.display()));
+
+    let taxdump_path = args
+        .taxdump_path
+        .map(PathBuf::from)
+        .unwrap_or_else(|| cache_dir.join("taxdump"));
+    let taxdump_path_str = taxdump_path.to_str().expect("Invalid taxdump path");
 
     // either use the provided assembly summary file or fetch it from source. if fetching from
     // source and it already exists; just use the existing file unless --no-cache is enabled.
     let assembly_summary_path = match (args.assembly_summary_path, &args.source) {
         (None, assembly_source) => {
-            let path = format!("assembly_summary_{}.txt", assembly_source.as_str());
+            let path = cache_dir
+                .join(format!("assembly_summary_{}.txt", assembly_source.as_str()))
+                .to_str()
+                .expect("Invalid assembly summary path")
+                .to_string();
             if args.no_cache || (!Path::new(&path).exists()) {
                 download_assembly_summary(assembly_source, &path);
             };
@@ -379,13 +399,13 @@ fn main() {
     };
 
     // download taxonomy
-    if args.no_cache || !Path::new(&args.taxdump_path).exists() {
-        download_and_extract_taxdump(&args.taxdump_path);
+    if args.no_cache || !Path::new(taxdump_path_str).exists() {
+        download_and_extract_taxdump(taxdump_path_str);
     }
 
     let pb = ProgressBar::new(0);
     pb.set_style(ProgressStyle::with_template(PB_SPINNER_TEMPLATE).unwrap());
-    pb.set_message(format!("Loading taxonomy from {}", &args.taxdump_path));
+    pb.set_message(format!("Loading taxonomy from {}", taxdump_path_str));
 
     // Spawn a separate thread to tick the spinner
     let pb_clone = pb.clone();
@@ -396,7 +416,7 @@ fn main() {
         }
     });
 
-    let tax = load_taxonomy(&args.taxdump_path);
+    let tax = load_taxonomy(taxdump_path_str);
 
     let tax_id: &str = get_tax_id(args.tax_id.as_deref(), args.tax_name.as_deref(), &tax)
         .expect("Unable to find a tax ID");
