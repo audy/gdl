@@ -84,6 +84,11 @@ struct Args {
     /// included
     #[clap(long)]
     assembly_level: Option<Vec<String>>,
+
+    /// only include assemblies that match this refseq_category (e.g. "reference genome",
+    /// "representative genome"). By default, all categories are included
+    #[clap(long)]
+    refseq_category: Option<Vec<String>>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -92,6 +97,7 @@ struct NCBIAssembly {
     ftp_path: String,
     // asm_name: String,
     assembly_level: String,
+    refseq_category: String,
 }
 
 #[derive(ValueEnum, Clone, Debug)]
@@ -287,6 +293,7 @@ fn filter_assemblies(
     assembly_summary_path: &String,
     // TODO: combine multiple with AND/OR?
     filter_assembly_levels: Option<Vec<String>>,
+    filter_refseq_categories: Option<Vec<String>>,
     filter_tax_ids: HashSet<&str>,
 ) -> Vec<NCBIAssembly> {
     // filter assembly summaries
@@ -333,10 +340,15 @@ fn filter_assemblies(
 
         if filter_tax_ids.contains(&assembly.taxid.as_str())
             && (filter_assembly_levels.is_none()
-                || (filter_assembly_levels
+                || filter_assembly_levels
                     .as_ref()
                     .expect("Unable to parse assembly level")
-                    .contains(&assembly.assembly_level)))
+                    .contains(&assembly.assembly_level))
+            && (filter_refseq_categories.is_none()
+                || filter_refseq_categories
+                    .as_ref()
+                    .expect("Unable to parse refseq category")
+                    .contains(&assembly.refseq_category))
         {
             assemblies.push(assembly);
         }
@@ -406,6 +418,7 @@ fn main() {
     let assemblies = filter_assemblies(
         &assembly_summary_path,
         args.assembly_level,
+        args.refseq_category,
         descendant_tax_ids,
     );
 
@@ -485,6 +498,7 @@ mod tests {
             taxid: "123".to_string(),
             ftp_path: ftp_path.clone(),
             assembly_level: "Complete Genome".to_string(),
+            refseq_category: "reference genome".to_string(),
         };
         let format = AssemblyFormat::Fna;
         let client = Client::new();

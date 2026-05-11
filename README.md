@@ -103,3 +103,14 @@ Filter to only assemblies that match `<ASSEMBLY_LEVEL>`. Default is to include
 assemblies with any assembly level value. Possible values are `Contig`,
 `Scaffold`, `Complete Genome` and `Chromosome`. For defintions, see [NCBI
 documentation](https://www.ncbi.nlm.nih.gov/datasets/docs/v2/glossary/).
+
+### `--refseq-category <REFSEQ_CATEGORY>`
+
+Filter to only assemblies that match `<REFSEQ_CATEGORY>`. Default is to include
+all categories. Common values are `reference genome` and `representative genome`.
+Can be specified multiple times to include more than one category.
+
+```sh
+# Download only the reference genome for E. coli
+gdl --tax-name "Escherichia coli" --refseq-category "reference genome"
+```
